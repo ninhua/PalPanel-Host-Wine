@@ -540,6 +540,10 @@ func (c Config) PalWorldSettingsPath() string {
 	if runtime.GOOS == "linux" {
 		platform = "LinuxServer"
 	}
+	return c.PalWorldSettingsPathFor(platform)
+}
+
+func (c Config) PalWorldSettingsPathFor(platform string) string {
 	return filepath.Join(c.ServerDirectory(), "Pal", "Saved", "Config", platform, "PalWorldSettings.ini")
 }
 

@@ -19,7 +19,7 @@ if [[ "${1:-}" == "cmd.exe" ]]; then
   batch="${4#Z:}"
   batch="${batch//\\//}"
   batch="/${batch#/}"
-  destination="$(sed -n 's/^set "DEST=\(.*\)"$/\1/p' "$batch")"
+  destination="$(sed -n 's/\r$//; s/^set "DEST=\(.*\)"$/\1/p' "$batch")"
   destination="${destination#Z:}"
   destination="${destination//\\//}"
   destination="/${destination#/}"
