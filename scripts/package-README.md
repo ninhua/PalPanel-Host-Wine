@@ -42,6 +42,17 @@ Programs are installed under `/opt/palpanel/<version>`, with
 in `/etc/palpanel`, and state is stored in `/var/lib/palpanel`. Reinstalling a
 new version preserves both locations.
 
+An upgrade records the previously active release and rejects an accidental
+downgrade by default. Roll back without changing configuration or data with:
+
+```bash
+sudo /opt/palpanel/current/palpanelctl rollback
+```
+
+Use `install --allow-downgrade` only for an intentional downgrade. Release
+switches update the `current` symlink atomically and keep the former target in
+`/opt/palpanel/previous`.
+
 The GitHub bootstrap installer also supports migration from an older
 containerized PalPanel when its data directory is mounted on the host:
 

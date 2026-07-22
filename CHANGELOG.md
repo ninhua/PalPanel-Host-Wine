@@ -40,6 +40,8 @@
   Mod/Workshop 页面的强制 Steam 登录门禁；PalPanel 自身认证和权限保持不变。
 - 移除 Workshop 搜索、详情、翻译、导入和下载的强制 Steam 登录门禁；账号缓存
   失效时前端回退匿名模式，不再清空商店或弹出强制登录窗口。
+- Linux 安装控制器保留版本目录并以原子符号链接切换 Release，默认拒绝降级，
+  新增 `palpanelctl rollback` 在当前版与上一版之间切换且不改写配置和业务数据。
 
 ### Fixed
 

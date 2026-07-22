@@ -394,9 +394,11 @@ install_system() {
   require_binary "$sav_bin"
   local docker_access=0
   local listen_addr=""
+  local allow_downgrade=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --docker) docker_access=1 ;;
+      --allow-downgrade) allow_downgrade=1 ;;
       --listen)
         [[ $# -ge 2 ]] || fail "--listen requires a host:port value"
         listen_addr="$2"
@@ -415,6 +417,15 @@ install_system() {
   [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || fail "invalid build version: $version"
   local version_dir="$opt_root/$version"
   local staging="$opt_root/.${version}.tmp.$BASHPID"
+	local current_target=""
+	local current_version=""
+	if [[ -L "$opt_root/current" ]]; then
+		current_target="$(readlink -f -- "$opt_root/current")"
+		current_version="$(basename -- "$current_target")"
+		if (( ! allow_downgrade )) && [[ "$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
+			fail "refusing downgrade from $current_version to $version without --allow-downgrade"
+		fi
+	fi
   rm -rf "$staging"
   mkdir -p "$staging" "$etc_dir" "$system_data_dir" "$systemd_dir"
   chmod 755 "$opt_root"
@@ -424,9 +435,17 @@ install_system() {
     [[ -e "$package_dir/$item" ]] && cp -a "$package_dir/$item" "$staging/"
   done
   rm -f "$staging/config/palpanel.env"
-  rm -rf "$version_dir"
-  mv "$staging" "$version_dir"
+	if [[ -e "$version_dir" ]]; then
+		rm -rf "$staging"
+	else
+		mv "$staging" "$version_dir"
+	fi
   chmod 755 "$version_dir"
+	if [[ -n "$current_target" && "$current_target" != "$version_dir" ]]; then
+		rm -f "$opt_root/.previous.new"
+		ln -s "$current_target" "$opt_root/.previous.new"
+		mv -Tf "$opt_root/.previous.new" "$opt_root/previous"
+	fi
   rm -f "$opt_root/.current.new"
   ln -s "$version_dir" "$opt_root/.current.new"
   mv -Tf "$opt_root/.current.new" "$opt_root/current"
@@ -475,6 +494,28 @@ install_system() {
   printf 'installed PalPanel %s in %s\n' "$version" "$version_dir"
 }
 
+rollback_system() {
+	require_root
+	[[ $# -eq 0 ]] || fail "rollback does not accept options"
+	[[ -L "$opt_root/current" ]] || fail "no current system release is installed"
+	[[ -L "$opt_root/previous" ]] || fail "no previous release is available for rollback"
+	local current_target previous_target
+	current_target="$(readlink -f -- "$opt_root/current")"
+	previous_target="$(readlink -f -- "$opt_root/previous")"
+	[[ "$current_target" == "$opt_root/"* && "$previous_target" == "$opt_root/"* ]] || fail "release symlink escapes the install root"
+	[[ -x "$previous_target/bin/palpanel" && -x "$previous_target/palpanelctl" ]] || fail "previous release is incomplete"
+	rm -f "$opt_root/.current.rollback" "$opt_root/.previous.rollback"
+	ln -s "$previous_target" "$opt_root/.current.rollback"
+	ln -s "$current_target" "$opt_root/.previous.rollback"
+	mv -Tf "$opt_root/.previous.rollback" "$opt_root/previous"
+	mv -Tf "$opt_root/.current.rollback" "$opt_root/current"
+	if service_control_enabled; then
+		systemctl daemon-reload
+		systemctl restart palpanel-sav-cli.service palpanel-palcalc.service palpanel.service
+	fi
+	printf 'rolled back PalPanel from %s to %s\n' "$(basename -- "$current_target")" "$(basename -- "$previous_target")"
+}
+
 uninstall_system() {
   require_root
   local purge=0
@@ -512,8 +553,9 @@ Commands:
   status               show process or systemd status
   logs [-f]            show or follow bounded logs
   config [edit]        print or edit the active config path
-  install [--docker] [--listen HOST:PORT]
+  install [--docker] [--listen HOST:PORT] [--allow-downgrade]
                        install under /opt and enable systemd services
+  rollback             atomically switch current and previous system releases
   uninstall [--purge]  remove programs; preserve config/data unless purged
 EOF
 }
@@ -551,6 +593,7 @@ case "$command" in
   logs) show_logs "$@" ;;
   config) show_config "$@" ;;
   install) install_system "$@" ;;
+  rollback) rollback_system "$@" ;;
   uninstall) uninstall_system "$@" ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 64 ;;
