@@ -200,7 +200,6 @@ supervisor_cleanup() {
 supervise() {
   require_binary "$backend_bin"
   require_binary "$sav_bin"
-  require_binary "$palcalc_bin"
   ensure_portable_config
   mkdir -p "$portable_data" "$runtime_dir" "$log_dir"
   if pid_running "$runtime_dir/supervisor.pid"; then
@@ -211,7 +210,9 @@ supervise() {
   local palcalc_health_url="http://127.0.0.1:$palcalc_port/health"
   panel_health_url="$(backend_health_url)"
   require_unused_health_endpoint "sav-cli" "$sav_health_url" || return 1
-  require_unused_health_endpoint "palcalc-bridge" "$palcalc_health_url" || return 1
+  if [[ -x "$palcalc_bin" ]]; then
+    require_unused_health_endpoint "palcalc-bridge" "$palcalc_health_url" || return 1
+  fi
   require_unused_health_endpoint "palpanel" "$panel_health_url" || return 1
   printf '%s\n' "$BASHPID" >"$runtime_dir/supervisor.pid"
   rm -f "$runtime_dir/ready"
@@ -226,13 +227,17 @@ supervise() {
     return 1
   fi
 
-  rotate_log "$log_dir/palcalc-bridge.log"
-  PALCALC_BRIDGE_URLS="http://127.0.0.1:$palcalc_port" PALCALC_BRIDGE_CONCURRENCY=1 \
-    "$palcalc_bin" >>"$log_dir/palcalc-bridge.log" 2>&1 &
-  printf '%s\n' "$!" >"$runtime_dir/palcalc-bridge.pid"
-  if ! wait_for_health "$palcalc_health_url" "$runtime_dir/palcalc-bridge.pid" 90; then
-    printf 'palcalc-bridge failed its health check\n' >&2
-    return 1
+  if [[ -x "$palcalc_bin" ]]; then
+    rotate_log "$log_dir/palcalc-bridge.log"
+    PALCALC_BRIDGE_URLS="http://127.0.0.1:$palcalc_port" PALCALC_BRIDGE_CONCURRENCY=1 \
+      "$palcalc_bin" >>"$log_dir/palcalc-bridge.log" 2>&1 &
+    printf '%s\n' "$!" >"$runtime_dir/palcalc-bridge.pid"
+    if ! wait_for_health "$palcalc_health_url" "$runtime_dir/palcalc-bridge.pid" 90; then
+      printf 'palcalc-bridge failed its health check; breeding features are degraded\n' >&2
+      stop_pid_file "$runtime_dir/palcalc-bridge.pid"
+    fi
+  else
+    printf 'palcalc-bridge is missing; breeding features are degraded\n' >&2
   fi
 
   rotate_log "$log_dir/palpanel.log"
@@ -250,7 +255,7 @@ supervise() {
   fi
   : >"$runtime_dir/ready"
 
-  while pid_running "$runtime_dir/backend.pid" && pid_running "$runtime_dir/sav-cli.pid" && pid_running "$runtime_dir/palcalc-bridge.pid"; do
+  while pid_running "$runtime_dir/backend.pid" && pid_running "$runtime_dir/sav-cli.pid"; do
     rotate_log "$log_dir/palpanel.log"
     rotate_log "$log_dir/sav-cli.log"
     rotate_log "$log_dir/palcalc-bridge.log"
@@ -275,8 +280,7 @@ portable_start() {
     if [[ -f "$runtime_dir/ready" ]]; then
       if kill -0 "$supervisor_pid" 2>/dev/null &&
         pid_running "$runtime_dir/backend.pid" &&
-        pid_running "$runtime_dir/sav-cli.pid" &&
-        pid_running "$runtime_dir/palcalc-bridge.pid"; then
+        pid_running "$runtime_dir/sav-cli.pid"; then
         printf 'PalPanel started: %s\n' "$(backend_health_url | sed 's|/api/health$|/|')"
         return 0
       fi
@@ -310,7 +314,7 @@ portable_status() {
   pid_running "$runtime_dir/sav-cli.pid" && sav_state="running"
   pid_running "$runtime_dir/palcalc-bridge.pid" && palcalc_state="running"
   printf 'palpanel: %s\nsav-cli: %s\npalcalc-bridge: %s\n' "$backend_state" "$sav_state" "$palcalc_state"
-  [[ "$backend_state" == "running" && "$sav_state" == "running" && "$palcalc_state" == "running" ]]
+  [[ "$backend_state" == "running" && "$sav_state" == "running" ]]
 }
 
 show_logs() {

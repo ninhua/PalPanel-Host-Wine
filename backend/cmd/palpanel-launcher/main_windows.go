@@ -110,10 +110,14 @@ func run(args []string) error {
 	serverPath := filepath.Join(root, "palpanel-server.exe")
 	savPath := filepath.Join(root, "sav-cli.exe")
 	palcalcPath := filepath.Join(root, "palcalc-bridge.exe")
-	for _, path := range []string{serverPath, savPath, palcalcPath} {
+	for _, path := range []string{serverPath, savPath} {
 		if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
 			return fmt.Errorf("required executable is missing: %s", path)
 		}
+	}
+	palcalcAvailable := false
+	if info, statErr := os.Stat(palcalcPath); statErr == nil && !info.IsDir() {
+		palcalcAvailable = true
 	}
 	configPath := filepath.Join(runtimeRoot, "config", "palpanel.env")
 	dataPath := filepath.Join(runtimeRoot, "data")
@@ -185,13 +189,22 @@ func run(args []string) error {
 	if err := waitForHealth("http://127.0.0.1:8090/health", savChild, 30*time.Second); err != nil {
 		return fmt.Errorf("sav-cli health check: %w", err)
 	}
-	palcalcChild, err := startChild(job, palcalcPath, nil, map[string]string{"PALCALC_BRIDGE_URLS": "http://127.0.0.1:8091", "PALCALC_BRIDGE_CONCURRENCY": "1"}, palcalcLog)
-	if err != nil {
-		return fmt.Errorf("start palcalc bridge: %w", err)
+	var palcalcErr error
+	if palcalcAvailable {
+		palcalcChild, startErr := startChild(job, palcalcPath, nil, map[string]string{"PALCALC_BRIDGE_URLS": "http://127.0.0.1:8091", "PALCALC_BRIDGE_CONCURRENCY": "1"}, palcalcLog)
+		palcalcErr = startErr
+		if startErr == nil {
+			defer palcalcChild.closeLog()
+			palcalcErr = waitForHealth("http://127.0.0.1:8091/health", palcalcChild, 45*time.Second)
+			if palcalcErr != nil {
+				palcalcChild.stop()
+			}
+		}
+	} else {
+		palcalcErr = errors.New("palcalc-bridge.exe is missing")
 	}
-	defer palcalcChild.closeLog()
-	if err := waitForHealth("http://127.0.0.1:8091/health", palcalcChild, 45*time.Second); err != nil {
-		return fmt.Errorf("palcalc bridge health check: %w", err)
+	if palcalcErr != nil {
+		logOptionalSidecarFailure(palcalcLog, "PalCalc breeding features are unavailable", palcalcErr)
 	}
 
 	childEnv := map[string]string{
@@ -241,9 +254,18 @@ func run(args []string) error {
 				dismissMessageBox(title, finished)
 			},
 		)
-		return waitForPromptOrManagedChildren(prompt, namedChild{"sav-cli", savChild}, namedChild{"palcalc bridge", palcalcChild}, namedChild{"palpanel server", serverChild})
+		return waitForPromptOrManagedChildren(prompt, namedChild{"sav-cli", savChild}, namedChild{"palpanel server", serverChild})
 	}
-	return waitForEitherChild(savChild, palcalcChild, serverChild)
+	return waitForEitherChild(savChild, serverChild)
+}
+
+func logOptionalSidecarFailure(path, message string, err error) {
+	logFile, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if openErr != nil {
+		return
+	}
+	defer logFile.Close()
+	_, _ = fmt.Fprintf(logFile, "%s [palpanel-launcher] %s: %v\r\n", time.Now().UTC().Format(time.RFC3339Nano), message, err)
 }
 
 func acquireInstanceMutex(root string) (windows.Handle, bool, error) {
@@ -311,7 +333,7 @@ func startChild(job windows.Handle, path string, args []string, overrides map[st
 		done <- cmd.Wait()
 		close(done)
 	}()
-	return &childProcess{log: logFile, done: done}, nil
+	return &childProcess{log: logFile, done: done, process: cmd.Process}, nil
 }
 
 func mergeEnvironment(current []string, overrides map[string]string) []string {

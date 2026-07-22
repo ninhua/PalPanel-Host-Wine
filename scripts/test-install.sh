@@ -133,13 +133,6 @@ verify_portable_failure() {
       printf 'backend started after the sav-cli fixture had already exited\n' >&2
       exit 1
     fi
-  elif [[ "$exiting" == "palcalc" ]]; then
-    grep -qx 'palcalc-exit' "$events"
-    if grep -qx 'backend-start' "$events"; then
-      printf 'backend started after the palcalc fixture had already exited\n' >&2
-      exit 1
-    fi
-    grep -qx 'sav-cli-stop' "$events"
   else
     grep -qx 'backend-start' "$events"
     grep -qx 'backend-exit' "$events"
@@ -150,8 +143,49 @@ verify_portable_failure() {
   [[ ! -e "$portable_test/run/supervisor.pid" && ! -e "$portable_test/run/ready" ]]
 }
 verify_portable_failure sav-cli
-verify_portable_failure palcalc
 verify_portable_failure backend
+
+rm -rf "$portable_test/config" "$portable_test/data" "$portable_test/run" "$portable_test/logs"
+palcalc_events="$tmp/portable-palcalc-events.log"
+PALPANEL_FAKE_EVENTS="$palcalc_events" \
+  PALPANEL_FAKE_EXIT_CHILD=palcalc \
+  PALPANEL_CONFIG="$portable_test/config/palpanel.env" \
+  PALPANEL_DATA_DIR="$portable_test/data" \
+  PALPANEL_RUNTIME_DIR="$portable_test/run" \
+  PALPANEL_LOG_DIR="$portable_test/logs" \
+  "$portable_test/palpanelctl" start >"$tmp/portable-palcalc.out" 2>"$tmp/portable-palcalc.err"
+grep -Fq 'PalPanel started:' "$tmp/portable-palcalc.out"
+grep -qx 'palcalc-exit' "$palcalc_events"
+grep -qx 'backend-start' "$palcalc_events"
+PALPANEL_CONFIG="$portable_test/config/palpanel.env" \
+  PALPANEL_DATA_DIR="$portable_test/data" \
+  PALPANEL_RUNTIME_DIR="$portable_test/run" \
+  PALPANEL_LOG_DIR="$portable_test/logs" \
+  "$portable_test/palpanelctl" status >/dev/null
+PALPANEL_CONFIG="$portable_test/config/palpanel.env" \
+  PALPANEL_DATA_DIR="$portable_test/data" \
+  PALPANEL_RUNTIME_DIR="$portable_test/run" \
+  PALPANEL_LOG_DIR="$portable_test/logs" \
+  "$portable_test/palpanelctl" stop >/dev/null
+
+rm -rf "$portable_test/config" "$portable_test/data" "$portable_test/run" "$portable_test/logs"
+mv "$portable_test/bin/palcalc-bridge" "$portable_test/bin/palcalc-bridge.disabled"
+missing_events="$tmp/portable-palcalc-missing-events.log"
+PALPANEL_FAKE_EVENTS="$missing_events" \
+  PALPANEL_CONFIG="$portable_test/config/palpanel.env" \
+  PALPANEL_DATA_DIR="$portable_test/data" \
+  PALPANEL_RUNTIME_DIR="$portable_test/run" \
+  PALPANEL_LOG_DIR="$portable_test/logs" \
+  "$portable_test/palpanelctl" start >"$tmp/portable-palcalc-missing.out" 2>"$tmp/portable-palcalc-missing.err"
+grep -Fq 'PalPanel started:' "$tmp/portable-palcalc-missing.out"
+grep -Fq 'palcalc-bridge is missing; breeding features are degraded' "$portable_test/logs/controller.log"
+grep -qx 'backend-start' "$missing_events"
+PALPANEL_CONFIG="$portable_test/config/palpanel.env" \
+  PALPANEL_DATA_DIR="$portable_test/data" \
+  PALPANEL_RUNTIME_DIR="$portable_test/run" \
+  PALPANEL_LOG_DIR="$portable_test/logs" \
+  "$portable_test/palpanelctl" stop >/dev/null
+mv "$portable_test/bin/palcalc-bridge.disabled" "$portable_test/bin/palcalc-bridge"
 
 rm -rf "$portable_test/config" "$portable_test/data" "$portable_test/run" "$portable_test/logs"
 preexisting_out="$tmp/portable-preexisting.out"

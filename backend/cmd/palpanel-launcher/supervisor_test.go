@@ -43,6 +43,26 @@ func TestWaitForEitherChildReportsFirstExit(t *testing.T) {
 	}
 }
 
+func TestChildProcessStopTerminatesOnlyThatProcess(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestLauncherWaitHelper$")
+	command.Env = append(os.Environ(), "PALPANEL_LAUNCHER_WAIT_HELPER=1")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- command.Wait()
+		close(done)
+	}()
+	child := &childProcess{done: done, process: command.Process}
+	child.stop()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("child process did not stop")
+	}
+}
+
 func TestWaitForPromptOrChildrenReturnsWhenPromptCompletes(t *testing.T) {
 	promptErr := errors.New("prompt failed")
 	for _, test := range []struct {
@@ -134,4 +154,11 @@ func TestLauncherExitHelper(t *testing.T) {
 		return
 	}
 	os.Exit(23)
+}
+
+func TestLauncherWaitHelper(t *testing.T) {
+	if os.Getenv("PALPANEL_LAUNCHER_WAIT_HELPER") != "1" {
+		return
+	}
+	time.Sleep(30 * time.Second)
 }

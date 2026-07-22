@@ -11,8 +11,15 @@ import (
 )
 
 type childProcess struct {
-	log  *os.File
-	done <-chan error
+	log     *os.File
+	done    <-chan error
+	process *os.Process
+}
+
+func (c *childProcess) stop() {
+	if c != nil && c.process != nil {
+		_ = c.process.Kill()
+	}
 }
 
 type promptEvent struct {
