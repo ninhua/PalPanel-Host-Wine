@@ -54,7 +54,7 @@ func TestWorkshopAuthStatusWithoutAccountDoesNotProbeOrInstall(t *testing.T) {
 	}
 }
 
-func TestWorkshopSearchRequiresVerifiedSteamSession(t *testing.T) {
+func TestWorkshopSearchWorksWithoutSteamSession(t *testing.T) {
 	server, cleanup := newWorkshopAuthTestServer(t)
 	defer cleanup()
 	gin.SetMode(gin.TestMode)
@@ -62,7 +62,7 @@ func TestWorkshopSearchRequiresVerifiedSteamSession(t *testing.T) {
 	router.GET("/api/mods/workshop/search", server.searchWorkshopMods)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/mods/workshop/search", nil))
-	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), `"code":"steam_login_required"`) {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"items":[]`) {
 		t.Fatalf("response = %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -136,12 +136,17 @@ func TestSteamAuthOperationalErrorIsStableAndRedacted(t *testing.T) {
 func newWorkshopAuthTestServer(t *testing.T) (Server, func()) {
 	t.Helper()
 	root := t.TempDir()
+	steamAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"response":{"result":1,"total":0,"publishedfiledetails":[]}}`))
+	}))
 	cfg := appconfig.Config{
 		RuntimeRoot: root,
 		DataDir:     root, ServerDir: filepath.Join(root, "server"), WinePrefixDir: filepath.Join(root, "wine"),
 		ToolsDir: filepath.Join(root, "tools"), SteamCMDDir: filepath.Join(root, "tools", "steamcmd"),
 		UploadsDir: filepath.Join(root, "uploads"), BackupsDir: filepath.Join(root, "backups"), LogsDir: filepath.Join(root, "logs"),
-		DBPath: filepath.Join(root, "test.db"), WorkshopAppID: "1623730", DockerBinary: "false", DockerImage: "test",
+		DBPath: filepath.Join(root, "test.db"), WorkshopAppID: "1623730", SteamAPIBaseURL: steamAPI.URL,
+		SteamAPITimeoutSeconds: 2, DockerBinary: "false", DockerImage: "test",
 	}
 	if err := cfg.EnsureDirs(); err != nil {
 		t.Fatal(err)
@@ -154,5 +159,8 @@ func newWorkshopAuthTestServer(t *testing.T) (Server, func()) {
 	if err := store.SetKV(t.Context(), "runtime_mode", "windows_steamcmd"); err != nil {
 		t.Fatal(err)
 	}
-	return server, func() { _ = store.Close() }
+	return server, func() {
+		_ = store.Close()
+		steamAPI.Close()
+	}
 }

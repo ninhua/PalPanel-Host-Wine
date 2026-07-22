@@ -17,6 +17,52 @@ func TestLoadRequiresAuthenticationByDefault(t *testing.T) {
 	}
 }
 
+func TestLoadUsesOrderedGitHubDownloadFallbacks(t *testing.T) {
+	t.Setenv("PALPANEL_GITHUB_PROXY_BASES", "")
+	t.Setenv("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS", "")
+	t.Setenv("PALPANEL_DOWNLOAD_RETRIES", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.GitHubProxyBases) != 2 || cfg.GitHubProxyBases[0] != "https://v4.gh-proxy.org" || cfg.GitHubProxyBases[1] != "https://cdn.gh-proxy.org" {
+		t.Fatalf("GitHubProxyBases = %#v", cfg.GitHubProxyBases)
+	}
+	if cfg.DownloadTimeoutSeconds != DefaultDownloadTimeoutSeconds || cfg.DownloadRetries != DefaultDownloadRetries {
+		t.Fatalf("download policy = timeout %d, retries %d", cfg.DownloadTimeoutSeconds, cfg.DownloadRetries)
+	}
+}
+
+func TestLoadRejectsUnsafeGitHubProxy(t *testing.T) {
+	t.Setenv("PALPANEL_GITHUB_PROXY_BASES", "http://127.0.0.1:8080,https://cdn.example")
+	if _, err := Load(); err == nil {
+		t.Fatal("unsafe GitHub proxy was accepted")
+	}
+}
+
+func TestLoadConfiguresPalDefenderReleaseSource(t *testing.T) {
+	t.Setenv("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", "https://releases.example/paldefender/")
+	t.Setenv("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB", "96")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PalDefenderReleaseAPIBaseURL != "https://releases.example/paldefender" || cfg.PalDefenderDownloadMaxBytes != 96<<20 {
+		t.Fatalf("PalDefender release config = %q, %d", cfg.PalDefenderReleaseAPIBaseURL, cfg.PalDefenderDownloadMaxBytes)
+	}
+}
+
+func TestLoadSelectsExperimentalPalworldUE4SSChannel(t *testing.T) {
+	t.Setenv("PALPANEL_UE4SS_RELEASE_CHANNEL", "experimental-palworld")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UE4SSReleaseChannel != "experimental-palworld" || cfg.UE4SSExperimentalURL != DefaultUE4SSExperimentalURL || cfg.UE4SSExperimentalSHA256 != DefaultUE4SSExperimentalSHA256 {
+		t.Fatalf("experimental UE4SS config = channel %q, URL %q, SHA %q", cfg.UE4SSReleaseChannel, cfg.UE4SSExperimentalURL, cfg.UE4SSExperimentalSHA256)
+	}
+}
+
 func TestLoadAllowsExplicitDevNoAuth(t *testing.T) {
 	t.Setenv("PALPANEL_REQUIRE_AUTH", "false")
 	t.Setenv("STEAM_WEB_API_KEY", "steam-key")

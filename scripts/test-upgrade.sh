@@ -79,5 +79,13 @@ backup_hash="$(sha256sum "$PALPANEL_SYSTEM_DATA_DIR/backups/upgrade-test.zip" | 
 [[ -L "$PALPANEL_INSTALL_ROOT/current" ]]
 [[ "$(readlink -f "$PALPANEL_INSTALL_ROOT/current")" == "$PALPANEL_INSTALL_ROOT/$(basename "$candidate_dir" | sed 's/^palpanel_//; s/_linux_amd64$//')" ]]
 
+candidate_target="$(readlink -f "$PALPANEL_INSTALL_ROOT/current")"
+previous_target="$PALPANEL_INSTALL_ROOT/$previous_version"
+"$candidate_dir/palpanelctl" rollback >/dev/null
+[[ "$(readlink -f "$PALPANEL_INSTALL_ROOT/current")" == "$previous_target" ]]
+[[ "$(readlink -f "$PALPANEL_INSTALL_ROOT/previous")" == "$candidate_target" ]]
+"$candidate_dir/palpanelctl" rollback >/dev/null
+[[ "$(readlink -f "$PALPANEL_INSTALL_ROOT/current")" == "$candidate_target" ]]
+
 "$candidate_dir/palpanelctl" uninstall --purge >/dev/null
 printf 'upgrade preservation verification passed: %s -> candidate\n' "$previous_version"

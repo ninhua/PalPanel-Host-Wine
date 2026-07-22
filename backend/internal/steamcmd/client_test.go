@@ -47,6 +47,28 @@ func TestDownloadWorkshopToActivatesOnlyVerifiedResult(t *testing.T) {
 	}
 }
 
+func TestDownloadWorkshopToDefaultsToAnonymousWithoutAccount(t *testing.T) {
+	client, cfg := newTestClient(t)
+	client.login = loginState{}
+	var captured []string
+	client.runCommand = func(_ context.Context, _, _ string, args ...string) ([]byte, error) {
+		captured = append([]string(nil), args...)
+		stage := argumentAfter(t, args, "+force_install_dir")
+		item := filepath.Join(stage, "steamapps", "workshop", "content", "1623730", "123456789")
+		if err := os.MkdirAll(item, 0o755); err != nil {
+			return nil, err
+		}
+		return []byte("Success. Downloaded item 123456789"), os.WriteFile(filepath.Join(item, "Info.json"), []byte(`{"PackageName":"Fixture"}`), 0o644)
+	}
+	destination := filepath.Join(cfg.RuntimeRoot, "mods", "staging", "anonymous")
+	if err := client.DownloadWorkshopTo(t.Context(), "1623730", "123456789", destination, ""); err != nil {
+		t.Fatalf("anonymous DownloadWorkshopTo: %v", err)
+	}
+	if got := argumentAfter(t, captured, "+login"); got != "anonymous" {
+		t.Fatalf("SteamCMD login = %q, want anonymous", got)
+	}
+}
+
 func TestDownloadWorkshopToRejectsMissingResultWithoutReplacingPrevious(t *testing.T) {
 	client, cfg := newTestClient(t)
 	client.runCommand = func(context.Context, string, string, ...string) ([]byte, error) {

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"palpanel/internal/appconfig"
 )
 
 func TestUE4SSInstallPreservesUserConfigurationAndIsIdempotent(t *testing.T) {
@@ -125,6 +127,15 @@ func ue4ssFixtureManager(t *testing.T, archive []byte) (Manager, func()) {
 	return manager, func() {
 		server.Close()
 		cleanup()
+	}
+}
+
+func TestExperimentalPalworldChannelUsesNativeProfile(t *testing.T) {
+	manager, cleanup := testManager(t)
+	defer cleanup()
+	manager.cfg.UE4SSReleaseChannel = "experimental-palworld"
+	if manager.effectiveUE4SSChannel() != "experimental-palworld" || manager.effectiveUE4SSVersion() != appconfig.DefaultUE4SSExperimentalVersion || manager.effectiveUE4SSDownloadURL() != appconfig.DefaultUE4SSExperimentalURL || manager.effectiveUE4SSSHA256() != appconfig.DefaultUE4SSExperimentalSHA256 {
+		t.Fatalf("experimental profile = %q %q %q %q", manager.effectiveUE4SSChannel(), manager.effectiveUE4SSVersion(), manager.effectiveUE4SSDownloadURL(), manager.effectiveUE4SSSHA256())
 	}
 }
 

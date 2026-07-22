@@ -18,9 +18,9 @@ import (
 
 	"palpanel/internal/appconfig"
 	"palpanel/internal/db"
+	"palpanel/internal/downloadclient"
 	"palpanel/internal/id"
 	"palpanel/internal/jobs"
-	"palpanel/internal/steamcmd"
 )
 
 const (
@@ -112,7 +112,7 @@ func newImportRegistry(cfg appconfig.Config) *importRegistry {
 		records:       map[string]*importRecord{},
 		root:          root,
 		now:           time.Now,
-		downloader:    newSafeDownloader(),
+		downloader:    newSafeDownloader(cfg),
 		githubAPIBase: "https://api.github.com",
 		maxBytes:      limit,
 		cfg:           cfg,
@@ -239,25 +239,10 @@ func (m Manager) Import(ctx context.Context, inspectionID, candidateID string) (
 	if err != nil {
 		return db.Job{}, err
 	}
-	if candidate.workshopID != "" {
-		if _, err := m.RequireWorkshopLogin(ctx); err != nil {
-			m.imports.release(record)
-			switch {
-			case errors.Is(err, steamcmd.ErrLoginRequired):
-				return db.Job{}, ImportFailure{Code: "steam_login_required", Err: steamcmd.ErrLoginRequired}
-			case errors.Is(err, steamcmd.ErrInteractiveLogin):
-				return db.Job{}, ImportFailure{Code: "steam_login_unsupported", Err: steamcmd.ErrInteractiveLogin}
-			case errors.Is(err, steamcmd.ErrInvalidAccountName):
-				return db.Job{}, ImportFailure{Code: "invalid_steam_account", Err: errors.New("saved Steam account name is invalid")}
-			default:
-				return db.Job{}, ImportFailure{Code: "steam_login_verify_failed", Err: errors.New("Steam login verification failed")}
-			}
-		}
-	}
 	job, err := m.jobs.Submit(ctx, jobs.ClassLifecycle, "mod_import", "queued mod import", func(jobCtx context.Context, jobID string) {
 		defer m.imports.complete(record)
 		if candidate.workshopID != "" {
-			m.runWorkshopImport(jobCtx, jobID, candidate.workshopID, false, candidate.workshopMeta, record.directory)
+			m.runWorkshopImport(jobCtx, jobID, candidate.workshopID, false, false, candidate.workshopMeta, record.directory)
 			return
 		}
 		m.update(jobID, "running", 45, "installing validated mod", "")
@@ -305,7 +290,7 @@ func (m Manager) inspectGitHub(ctx context.Context, record *importRecord, parsed
 		releaseEndpoint = strings.TrimRight(m.imports.githubAPIBase, "/") + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/releases/tags/" + url.PathEscape(tag)
 	}
 	metadataPath := filepath.Join(record.directory, "release.json")
-	if _, err := m.imports.downloader.Download(ctx, releaseEndpoint, metadataPath, githubMetadataLimit); err != nil {
+	if _, err := m.imports.downloader.Download(ctx, releaseEndpoint, metadataPath, githubMetadataLimit, false, nil); err != nil {
 		return ImportFailure{Code: "github_release_failed", Err: err}
 	}
 	body, err := os.ReadFile(metadataPath)
@@ -359,7 +344,7 @@ func (m Manager) prepareArchiveCandidate(ctx context.Context, record *importReco
 		return err
 	}
 	archivePath := filepath.Join(directory, "archive.zip")
-	size, err := m.imports.downloader.Download(ctx, candidate.downloadURL, archivePath, m.imports.maxBytes)
+	size, err := m.imports.downloader.Download(ctx, candidate.downloadURL, archivePath, m.imports.maxBytes, true, downloadclient.ValidateZIP)
 	if err != nil {
 		return ImportFailure{Code: "download_failed", Err: err}
 	}
@@ -527,7 +512,7 @@ func (m Manager) installPrepared(ctx context.Context, sourceRoot, source, worksh
 	return mod, nil
 }
 
-func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, enableNew bool, meta WorkshopItem, directory string) {
+func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, enableNew, useSteamAccount bool, meta WorkshopItem, directory string) {
 	downloadRoot := filepath.Join(directory, "workshop")
 	if err := m.cfg.ValidateManagedPath(downloadRoot, false); err != nil {
 		m.update(jobID, "failed", 20, "Workshop staging directory is unsafe", err.Error())
@@ -541,7 +526,7 @@ func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, en
 		m.update(jobID, "failed", 20, "Workshop staging directory is unsafe", err.Error())
 		return
 	}
-	if err := m.downloadWorkshopTo(ctx, jobID, itemID, downloadRoot); err != nil {
+	if err := m.downloadWorkshopTo(ctx, jobID, itemID, downloadRoot, useSteamAccount); err != nil {
 		m.update(jobID, "failed", 50, "Workshop download failed", err.Error())
 		return
 	}

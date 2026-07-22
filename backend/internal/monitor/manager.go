@@ -104,6 +104,8 @@ func (m Manager) Sample(ctx context.Context) (db.MonitorSample, error) {
 		sample.QueryPortHealthy = status.Container.Status == "running"
 		if status.RuntimeMode == server.RuntimeWineDocker {
 			m.fillDockerStats(ctx, &sample)
+		} else if status.RuntimeMode == server.RuntimeHostWine {
+			m.fillHostWineStats(ctx, &sample)
 		} else {
 			m.fillWindowsProcessStats(ctx, &sample)
 		}
@@ -118,6 +120,27 @@ func (m Manager) Sample(ctx context.Context) (db.MonitorSample, error) {
 		return sample, err
 	}
 	return sample, nil
+}
+
+type hostWineMetricsSource interface {
+	HostWineMetrics(context.Context) (server.RuntimeMetrics, error)
+}
+
+func (m Manager) fillHostWineStats(ctx context.Context, sample *db.MonitorSample) {
+	source, ok := m.server.(hostWineMetricsSource)
+	if !ok {
+		appendReason(sample, "host wine metrics: provider unavailable")
+		return
+	}
+	metrics, err := source.HostWineMetrics(ctx)
+	if err != nil {
+		appendReason(sample, "host wine metrics: "+err.Error())
+		return
+	}
+	sample.CPUAvailable = true
+	sample.CPUPercent = metrics.CPUPercent
+	sample.MemoryAvailable = true
+	sample.MemoryUsageBytes = int64(metrics.MemoryBytes)
 }
 
 func (m Manager) Prune(ctx context.Context) error {

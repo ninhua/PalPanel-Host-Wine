@@ -785,9 +785,6 @@ func (s Server) workshopStatus(c *gin.Context) {
 }
 
 func (s Server) searchWorkshopMods(c *gin.Context) {
-	if !s.requireWorkshopLogin(c) {
-		return
-	}
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "24"))
 	params := mods.WorkshopSearchParams{
 		Query:    c.Query("q"),
@@ -805,9 +802,6 @@ func (s Server) searchWorkshopMods(c *gin.Context) {
 }
 
 func (s Server) getWorkshopMod(c *gin.Context) {
-	if !s.requireWorkshopLogin(c) {
-		return
-	}
 	item, err := s.mods.WorkshopDetail(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		failWorkshop(c, err)
@@ -846,22 +840,23 @@ func (s Server) uploadMod(c *gin.Context) {
 }
 
 func (s Server) downloadWorkshop(c *gin.Context) {
-	if !s.requireWorkshopLogin(c) {
-		return
-	}
 	var req struct {
-		ItemID string `json:"item_id"`
-		Enable *bool  `json:"enable"`
+		ItemID          string `json:"item_id"`
+		Enable          *bool  `json:"enable"`
+		UseSteamAccount bool   `json:"use_steam_account"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if req.UseSteamAccount && !s.requireWorkshopLogin(c) {
 		return
 	}
 	enable := false
 	if req.Enable != nil {
 		enable = *req.Enable
 	}
-	j, err := s.mods.DownloadWorkshop(c.Request.Context(), req.ItemID, enable)
+	j, err := s.mods.DownloadWorkshop(c.Request.Context(), req.ItemID, enable, req.UseSteamAccount)
 	if err != nil {
 		fail(c, http.StatusBadRequest, "workshop_failed", err.Error())
 		return

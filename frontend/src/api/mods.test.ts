@@ -203,7 +203,7 @@ describe('mods api mapping', () => {
 
     await modsApi.downloadWorkshop('123456789', true);
 
-    expect(postSpy).toHaveBeenCalledWith('/mods/workshop', { item_id: '123456789', enable: true });
+    expect(postSpy).toHaveBeenCalledWith('/mods/workshop', { item_id: '123456789', enable: true, use_steam_account: false });
     postSpy.mockRestore();
   });
 

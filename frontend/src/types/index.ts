@@ -1,6 +1,6 @@
 import type { components } from '../api/generated/contracts';
 
-export type RuntimeMode = 'wine_docker' | 'windows_steamcmd' | 'linux_steamcmd';
+export type RuntimeMode = 'wine_docker' | 'windows_steamcmd' | 'host_wine' | 'linux_steamcmd';
 export type Role = 'admin' | 'operator' | 'viewer';
 export type Permission =
   | 'read'
@@ -575,6 +575,7 @@ export type UE4SSDependencyState =
 
 export interface UE4SSDependencyStatus {
   state: UE4SSDependencyState;
+  channel: 'stable' | 'experimental-palworld' | 'custom';
   installed: boolean;
   version?: string;
   compatible: boolean;

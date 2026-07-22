@@ -12,6 +12,12 @@ import (
 	"palpanel/internal/appconfig"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
 func TestSteamClientQueryFilesParameters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/IPublishedFileService/QueryFiles/v1/" {

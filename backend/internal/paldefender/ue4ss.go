@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"palpanel/internal/appconfig"
+	"palpanel/internal/downloadclient"
 	"palpanel/internal/id"
 	"palpanel/internal/server"
 )
@@ -44,6 +44,7 @@ type ServerState interface {
 
 type UE4SSDependencyStatus struct {
 	State         string          `json:"state"`
+	Channel       string          `json:"channel"`
 	Installed     bool            `json:"installed"`
 	Version       string          `json:"version,omitempty"`
 	Compatible    bool            `json:"compatible"`
@@ -65,6 +66,7 @@ type dependencyTracker struct {
 
 type ue4ssManifest struct {
 	Version       string            `json:"version"`
+	Channel       string            `json:"channel"`
 	ArchiveSHA256 string            `json:"archive_sha256"`
 	SourceURL     string            `json:"source_url"`
 	InstalledAt   string            `json:"installed_at"`
@@ -113,7 +115,7 @@ func (m Manager) detectUE4SS() UE4SSDependencyStatus {
 		return m.detectLinuxUE4SS()
 	}
 	status := UE4SSDependencyStatus{
-		State: UE4SSMissing, Files: map[string]bool{}, Path: m.cfg.Win64Dir(),
+		State: UE4SSMissing, Channel: m.effectiveUE4SSChannel(), Files: map[string]bool{}, Path: m.cfg.Win64Dir(),
 		Message: "UE4SS is missing; installing PalDefender will install the pinned UE4SS dependency first.",
 	}
 	present := 0
@@ -142,6 +144,15 @@ func (m Manager) detectUE4SS() UE4SSDependencyStatus {
 	}
 	status.Version = manifest.Version
 	status.ArchiveSHA256 = manifest.ArchiveSHA256
+	manifestChannel := strings.ToLower(strings.TrimSpace(manifest.Channel))
+	if manifestChannel == "" {
+		manifestChannel = "stable"
+	}
+	if manifestChannel != m.effectiveUE4SSChannel() {
+		status.State = UE4SSIncompatible
+		status.Message = fmt.Sprintf("UE4SS channel %s does not match configured channel %s; run repair/install.", manifestChannel, m.effectiveUE4SSChannel())
+		return status
+	}
 	if !strings.EqualFold(strings.TrimSpace(manifest.Version), m.effectiveUE4SSVersion()) {
 		status.State = UE4SSIncompatible
 		status.Message = fmt.Sprintf("UE4SS %s is not the pinned compatible version %s; update or repair it before PalDefender.", manifest.Version, m.effectiveUE4SSVersion())
@@ -279,7 +290,7 @@ func (m Manager) installUE4SS(ctx context.Context) error {
 	}
 
 	manifest := ue4ssManifest{
-		Version: m.effectiveUE4SSVersion(), ArchiveSHA256: m.effectiveUE4SSSHA256(),
+		Version: m.effectiveUE4SSVersion(), Channel: m.effectiveUE4SSChannel(), ArchiveSHA256: m.effectiveUE4SSSHA256(),
 		SourceURL: m.effectiveUE4SSDownloadURL(), InstalledAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Files: map[string]string{},
 	}
@@ -376,85 +387,18 @@ func rollbackUE4SSMutations(m Manager, mutations []ue4ssMutation) error {
 }
 
 func (m Manager) downloadPinnedUE4SS(ctx context.Context, destination string) error {
-	var failures []string
-	for attempt := 1; attempt <= 3; attempt++ {
-		err := m.downloadPinnedUE4SSOnce(ctx, destination)
-		if err == nil {
-			return nil
-		}
-		failures = append(failures, fmt.Sprintf("attempt %d: %v", attempt, err))
-		if attempt < 3 {
-			timer := time.NewTimer(time.Duration(attempt) * time.Second)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-	}
-	return fmt.Errorf("download UE4SS failed after 3 attempts: %s", strings.Join(failures, "; "))
-}
-
-func (m Manager) downloadPinnedUE4SSOnce(ctx context.Context, destination string) error {
 	if err := m.cfg.ValidateManagedPath(destination, false); err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, m.effectiveUE4SSDownloadURL(), nil)
-	if err != nil {
-		return err
-	}
-	response, err := m.client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("UE4SS download returned HTTP %d", response.StatusCode)
-	}
-	limit := m.effectiveUE4SSDownloadMaxBytes()
-	if response.ContentLength > limit {
-		return fmt.Errorf("UE4SS Content-Length exceeds %d bytes", limit)
-	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(destination), ".ue4ss-download-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	complete := false
-	defer func() {
-		_ = temporary.Close()
-		if !complete {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(response.Body, limit+1))
-	if err != nil {
-		return err
-	}
-	if written > limit {
-		return fmt.Errorf("UE4SS download exceeds %d bytes", limit)
-	}
-	actual := hex.EncodeToString(hasher.Sum(nil))
-	if !strings.EqualFold(actual, m.effectiveUE4SSSHA256()) {
-		return fmt.Errorf("UE4SS archive SHA-256 mismatch: got %s", actual)
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	_ = os.Remove(destination)
-	if err := os.Rename(temporaryPath, destination); err != nil {
-		return err
-	}
-	complete = true
-	return nil
+	_, err := m.downloads.Download(ctx, downloadclient.Request{
+		URL:         m.effectiveUE4SSDownloadURL(),
+		Destination: destination,
+		SHA256:      m.effectiveUE4SSSHA256(),
+		MaxBytes:    m.effectiveUE4SSDownloadMaxBytes(),
+		CacheKey:    "ue4ss:" + m.effectiveUE4SSVersion() + ":" + m.effectiveUE4SSSHA256(),
+		Validate:    downloadclient.ValidateZIP,
+	})
+	return err
 }
 
 func (m Manager) ensureGameStopped(ctx context.Context) error {
@@ -504,6 +448,12 @@ func (m Manager) effectiveUE4SSDir() string {
 }
 
 func (m Manager) effectiveUE4SSVersion() string {
+	if m.effectiveUE4SSChannel() == "experimental-palworld" {
+		if value := strings.TrimSpace(m.cfg.UE4SSExperimentalVersion); value != "" {
+			return value
+		}
+		return appconfig.DefaultUE4SSExperimentalVersion
+	}
 	if value := strings.TrimSpace(m.cfg.UE4SSVersion); value != "" {
 		return value
 	}
@@ -511,6 +461,12 @@ func (m Manager) effectiveUE4SSVersion() string {
 }
 
 func (m Manager) effectiveUE4SSDownloadURL() string {
+	if m.effectiveUE4SSChannel() == "experimental-palworld" {
+		if value := strings.TrimSpace(m.cfg.UE4SSExperimentalURL); value != "" {
+			return value
+		}
+		return appconfig.DefaultUE4SSExperimentalURL
+	}
 	if value := strings.TrimSpace(m.cfg.UE4SSDownloadURL); value != "" {
 		return value
 	}
@@ -518,10 +474,25 @@ func (m Manager) effectiveUE4SSDownloadURL() string {
 }
 
 func (m Manager) effectiveUE4SSSHA256() string {
+	if m.effectiveUE4SSChannel() == "experimental-palworld" {
+		if value := strings.TrimSpace(m.cfg.UE4SSExperimentalSHA256); value != "" {
+			return strings.ToLower(value)
+		}
+		return appconfig.DefaultUE4SSExperimentalSHA256
+	}
 	if value := strings.TrimSpace(m.cfg.UE4SSArchiveSHA256); value != "" {
 		return strings.ToLower(value)
 	}
 	return appconfig.DefaultUE4SSArchiveSHA256
+}
+
+func (m Manager) effectiveUE4SSChannel() string {
+	switch value := strings.ToLower(strings.TrimSpace(m.cfg.UE4SSReleaseChannel)); value {
+	case "experimental-palworld", "custom":
+		return value
+	default:
+		return "stable"
+	}
 }
 
 func (m Manager) effectiveUE4SSDownloadMaxBytes() int64 {

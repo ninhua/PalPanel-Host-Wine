@@ -274,7 +274,7 @@ func (m Manager) remoteBuildID(ctx context.Context) (string, string, error) {
 		source = "steamcmd_wine_runner"
 		raw, err = m.runner.AppInfo(ctx)
 	} else {
-		raw, err = m.windowsSteamAppInfo(ctx)
+		raw, err = m.steamAppInfo(ctx, mode)
 	}
 	if err != nil {
 		return "", source, err
@@ -286,8 +286,12 @@ func (m Manager) remoteBuildID(ctx context.Context) (string, string, error) {
 	return buildID, source, nil
 }
 
-func (m Manager) windowsSteamAppInfo(ctx context.Context) (string, error) {
-	return m.nativeSteamCMD().AppInfo(ctx, palworldServerAppID)
+func (m Manager) steamAppInfo(ctx context.Context, mode string) (string, error) {
+	platform := "windows"
+	if mode == RuntimeLinuxSteamCMD {
+		platform = "linux"
+	}
+	return m.nativeSteamCMD(platform).AppInfo(ctx, palworldServerAppID)
 }
 
 func (m Manager) createVersionAlert(ctx context.Context, info VersionInfo) error {

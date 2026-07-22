@@ -18,6 +18,8 @@ import (
 const DefaultDockerRunnerBaseImage = "scottyhardy/docker-wine:latest@sha256:477aae36af41923cfb5eefb23923b035f8010caa49eaded952316f937dd8a49b"
 const DefaultRCONPort = 25575
 const DefaultPalDefenderRESTPort = 17993
+const DefaultPalDefenderReleaseAPIBaseURL = "https://api.github.com/repos/Ultimeit/PalDefender/releases"
+const DefaultPalDefenderDownloadMaxMB = 64
 const DefaultSteamAPIBaseURL = "https://api.steampowered.com"
 const DefaultSteamAPITimeoutSeconds = 15
 const DefaultSteamCMDDownloadURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
@@ -27,8 +29,19 @@ const DefaultUE4SSVersion = "v3.0.1"
 const DefaultUE4SSDownloadURL = "https://github.com/UE4SS-RE/RE-UE4SS/releases/download/v3.0.1/UE4SS_v3.0.1.zip"
 const DefaultUE4SSArchiveSHA256 = "4b47d4bceddd2f561a4e395bfa00924ccfc945af576a2d0c613e6537846c57ec"
 const DefaultUE4SSDownloadMaxMB = 64
+const DefaultUE4SSReleaseChannel = "stable"
+const DefaultUE4SSExperimentalVersion = "experimental-palworld-20260719"
+const DefaultUE4SSExperimentalURL = "https://github.com/Okaetsu/RE-UE4SS/releases/download/experimental-palworld/UE4SS-Palworld.zip"
+const DefaultUE4SSExperimentalSHA256 = "768a45718fbb9e429ac5cc3ce4a139a1b7b468bff31b4a136ae483d725aca1ca"
 const DefaultAITranslationTimeoutSeconds = 90
 const DefaultMonitorRetentionDays = 7
+const DefaultDownloadTimeoutSeconds = 300
+const DefaultDownloadRetries = 2
+
+var DefaultGitHubProxyBases = []string{
+	"https://v4.gh-proxy.org",
+	"https://cdn.gh-proxy.org",
+}
 
 var DefaultDockerRunnerBaseImageMirrorPrefixes = []string{
 	"docker.m.daocloud.io",
@@ -49,18 +62,21 @@ type Config struct {
 	DataDir                      string
 	ServerDir                    string
 	WinePrefixDir                string
+	SteamCMDWinePrefixDir        string
 	ToolsDir                     string
 	SteamCMDDir                  string
 	UE4SSDir                     string
 	UploadsDir                   string
 	BackupsDir                   string
 	LogsDir                      string
+	DownloadCacheDir             string
 	DBPath                       string
 	RequireAuth                  bool
 	CORSOrigins                  []string
 	FrontendDist                 string
 	MaxUploadBytes               int64
 	DockerBinary                 string
+	WineBinary                   string
 	DockerImage                  string
 	DockerContainer              string
 	DockerRunnerBaseImage        string
@@ -75,6 +91,13 @@ type Config struct {
 	UE4SSDownloadURL             string
 	UE4SSArchiveSHA256           string
 	UE4SSDownloadMaxBytes        int64
+	UE4SSReleaseChannel          string
+	UE4SSExperimentalVersion     string
+	UE4SSExperimentalURL         string
+	UE4SSExperimentalSHA256      string
+	GitHubProxyBases             []string
+	DownloadTimeoutSeconds       int
+	DownloadRetries              int
 	WorkshopAppID                string
 	GamePort                     int
 	QueryPort                    int
@@ -89,6 +112,8 @@ type Config struct {
 	PalworldGameDataMaxBytes     int64
 	PalDefenderRESTBaseURL       string
 	PalDefenderRESTPort          int
+	PalDefenderReleaseAPIBaseURL string
+	PalDefenderDownloadMaxBytes  int64
 	SaveIndexerEnabled           bool
 	SaveIndexerURL               string
 	SaveIndexCacheDir            string
@@ -188,7 +213,9 @@ func Load() (Config, error) {
 	logsDefault := ""
 	dbDefault := ""
 	saveIndexDefault := ""
+	downloadCacheDefault := ""
 	winePrefixDefault := ""
+	steamCMDWinePrefixDefault := ""
 	if layout.Structured {
 		mutableBase = layout.RuntimeRoot
 		dataDefault = filepath.Join(layout.RuntimeRoot, "data")
@@ -201,7 +228,9 @@ func Load() (Config, error) {
 		logsDefault = filepath.Join(dataDefault, "logs")
 		dbDefault = filepath.Join(dataDefault, "database", "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDefault, "save-index")
+		downloadCacheDefault = filepath.Join(dataDefault, "cache", "downloads")
 		winePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix")
+		steamCMDWinePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix-steamcmd")
 	}
 	dataDir, err := configuredPath("PALPANEL_DATA_DIR", dataDefault, mutableBase)
 	if err != nil {
@@ -217,13 +246,19 @@ func Load() (Config, error) {
 		logsDefault = filepath.Join(dataDir, "logs")
 		dbDefault = filepath.Join(dataDir, "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDir, "save-index")
+		downloadCacheDefault = filepath.Join(dataDir, "cache", "downloads")
 		winePrefixDefault = filepath.Join(dataDir, "wineprefix")
+		steamCMDWinePrefixDefault = filepath.Join(dataDir, "wineprefix-steamcmd")
 	}
 	serverDir, err := configuredPath("PALPANEL_SERVER_DIR", serverDefault, mutableBase)
 	if err != nil {
 		return Config{}, err
 	}
 	winePrefixDir, err := configuredPath("PALPANEL_WINE_PREFIX_DIR", winePrefixDefault, mutableBase)
+	if err != nil {
+		return Config{}, err
+	}
+	steamCMDWinePrefixDir, err := configuredPath("PALPANEL_STEAMCMD_WINE_PREFIX_DIR", steamCMDWinePrefixDefault, mutableBase)
 	if err != nil {
 		return Config{}, err
 	}
@@ -259,6 +294,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	downloadCacheDir, err := configuredPath("PALPANEL_DOWNLOAD_CACHE_DIR", downloadCacheDefault, mutableBase)
+	if err != nil {
+		return Config{}, err
+	}
 	backendDir, err := configuredPath("PALPANEL_BACKEND_DIR", filepath.Join(root, "backend"), root)
 	if err != nil {
 		return Config{}, err
@@ -283,18 +322,21 @@ func Load() (Config, error) {
 		DataDir:                      dataDir,
 		ServerDir:                    serverDir,
 		WinePrefixDir:                winePrefixDir,
+		SteamCMDWinePrefixDir:        steamCMDWinePrefixDir,
 		ToolsDir:                     toolsDir,
 		SteamCMDDir:                  steamCMDDir,
 		UE4SSDir:                     ue4ssDir,
 		UploadsDir:                   uploadsDir,
 		BackupsDir:                   backupsDir,
 		LogsDir:                      logsDir,
+		DownloadCacheDir:             downloadCacheDir,
 		DBPath:                       dbPath,
 		RequireAuth:                  envBool("PALPANEL_REQUIRE_AUTH", true),
 		CORSOrigins:                  envList("PALPANEL_CORS_ORIGINS", []string{"http://127.0.0.1:3000", "http://localhost:3000"}),
 		FrontendDist:                 frontendDist,
 		MaxUploadBytes:               int64(envInt("PALPANEL_MAX_UPLOAD_MB", 256)) * 1024 * 1024,
 		DockerBinary:                 env("PALPANEL_DOCKER_BIN", "docker"),
+		WineBinary:                   env("PALPANEL_WINE_BIN", "wine64"),
 		DockerImage:                  env("PALPANEL_DOCKER_IMAGE", "palworld-wine-runner:local"),
 		DockerContainer:              env("PALPANEL_DOCKER_CONTAINER", "palworld-wine-server"),
 		DockerRunnerBaseImage:        env("PALPANEL_DOCKER_RUNNER_BASE_IMAGE", DefaultDockerRunnerBaseImage),
@@ -309,6 +351,13 @@ func Load() (Config, error) {
 		UE4SSDownloadURL:             strings.TrimSpace(env("PALPANEL_UE4SS_DOWNLOAD_URL", DefaultUE4SSDownloadURL)),
 		UE4SSArchiveSHA256:           strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_ARCHIVE_SHA256", DefaultUE4SSArchiveSHA256))),
 		UE4SSDownloadMaxBytes:        int64(envInt("PALPANEL_UE4SS_DOWNLOAD_MAX_MB", DefaultUE4SSDownloadMaxMB)) * 1024 * 1024,
+		UE4SSReleaseChannel:          strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_RELEASE_CHANNEL", DefaultUE4SSReleaseChannel))),
+		UE4SSExperimentalVersion:     strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_VERSION", DefaultUE4SSExperimentalVersion)),
+		UE4SSExperimentalURL:         strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_URL", DefaultUE4SSExperimentalURL)),
+		UE4SSExperimentalSHA256:      strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_SHA256", DefaultUE4SSExperimentalSHA256))),
+		GitHubProxyBases:             envList("PALPANEL_GITHUB_PROXY_BASES", DefaultGitHubProxyBases),
+		DownloadTimeoutSeconds:       envInt("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS", DefaultDownloadTimeoutSeconds),
+		DownloadRetries:              envInt("PALPANEL_DOWNLOAD_RETRIES", DefaultDownloadRetries),
 		WorkshopAppID:                env("PALPANEL_WORKSHOP_APP_ID", "1623730"),
 		GamePort:                     envInt("PALPANEL_GAME_PORT", 8211),
 		QueryPort:                    envInt("PALPANEL_QUERY_PORT", 27015),
@@ -323,6 +372,8 @@ func Load() (Config, error) {
 		PalworldGameDataMaxBytes:     int64(envInt("PALPANEL_GAME_DATA_MAX_MB", 16)) * 1024 * 1024,
 		PalDefenderRESTBaseURL:       env("PALPANEL_PALDEFENDER_REST_BASE_URL", fmt.Sprintf("http://127.0.0.1:%d", palDefenderRESTPort)),
 		PalDefenderRESTPort:          palDefenderRESTPort,
+		PalDefenderReleaseAPIBaseURL: strings.TrimRight(strings.TrimSpace(env("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", DefaultPalDefenderReleaseAPIBaseURL)), "/"),
+		PalDefenderDownloadMaxBytes:  int64(envInt("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB", DefaultPalDefenderDownloadMaxMB)) * 1024 * 1024,
 		SaveIndexerEnabled:           envBool("PALPANEL_SAVE_INDEXER_ENABLED", false),
 		SaveIndexerURL:               env("PALPANEL_SAVE_INDEXER_URL", "http://127.0.0.1:8090"),
 		SaveIndexCacheDir:            saveIndexCacheDir,
@@ -370,6 +421,41 @@ func Load() (Config, error) {
 	if cfg.UE4SSDownloadMaxBytes < 1*1024*1024 || cfg.UE4SSDownloadMaxBytes > 1024*1024*1024 {
 		return Config{}, fmt.Errorf("PALPANEL_UE4SS_DOWNLOAD_MAX_MB must be between 1 and 1024")
 	}
+	switch cfg.UE4SSReleaseChannel {
+	case "stable", "experimental-palworld", "custom":
+	default:
+		return Config{}, fmt.Errorf("PALPANEL_UE4SS_RELEASE_CHANNEL must be stable, experimental-palworld, or custom")
+	}
+	if err := validateHTTPSBaseURL("PALPANEL_UE4SS_EXPERIMENTAL_URL", cfg.UE4SSExperimentalURL); err != nil {
+		return Config{}, err
+	}
+	if cfg.UE4SSExperimentalVersion == "" || len(cfg.UE4SSExperimentalSHA256) != 64 {
+		return Config{}, fmt.Errorf("UE4SS experimental version and 64-character SHA-256 are required")
+	}
+	if _, err := hex.DecodeString(cfg.UE4SSExperimentalSHA256); err != nil {
+		return Config{}, fmt.Errorf("PALPANEL_UE4SS_EXPERIMENTAL_SHA256 must be hexadecimal")
+	}
+	if len(cfg.GitHubProxyBases) != len(DefaultGitHubProxyBases) {
+		return Config{}, fmt.Errorf("PALPANEL_GITHUB_PROXY_BASES must contain the primary and fallback proxy URLs")
+	}
+	for index, proxyBase := range cfg.GitHubProxyBases {
+		if err := validateHTTPSBaseURL("PALPANEL_GITHUB_PROXY_BASES", proxyBase); err != nil {
+			return Config{}, err
+		}
+		cfg.GitHubProxyBases[index] = strings.TrimRight(proxyBase, "/")
+	}
+	if cfg.DownloadTimeoutSeconds < 10 || cfg.DownloadTimeoutSeconds > 3600 {
+		return Config{}, fmt.Errorf("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS must be between 10 and 3600")
+	}
+	if cfg.DownloadRetries < 1 || cfg.DownloadRetries > 5 {
+		return Config{}, fmt.Errorf("PALPANEL_DOWNLOAD_RETRIES must be between 1 and 5")
+	}
+	if err := validateHTTPSBaseURL("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", cfg.PalDefenderReleaseAPIBaseURL); err != nil {
+		return Config{}, err
+	}
+	if cfg.PalDefenderDownloadMaxBytes < 1*1024*1024 || cfg.PalDefenderDownloadMaxBytes > 1024*1024*1024 {
+		return Config{}, fmt.Errorf("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB must be between 1 and 1024")
+	}
 	if cfg.AITranslationTimeoutSeconds < 1 || cfg.AITranslationTimeoutSeconds > 600 {
 		return Config{}, fmt.Errorf("PALPANEL_AI_TRANSLATION_TIMEOUT_SECONDS must be between 1 and 600")
 	}
@@ -408,7 +494,7 @@ func (c Config) EnsureDirs() error {
 			return err
 		}
 	}
-	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
+	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.SteamCMDWinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.DownloadCacheDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
 	for _, dir := range dirs {
 		if strings.TrimSpace(dir) == "" {
 			continue
@@ -437,6 +523,10 @@ func (c Config) PalServerExePath() string {
 	return filepath.Join(c.ServerDirectory(), "PalServer.exe")
 }
 
+func (c Config) PalServerShippingPath() string {
+	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe")
+}
+
 func (c Config) PalServerLinuxPath() string {
 	return filepath.Join(c.ServerDirectory(), "PalServer.sh")
 }
@@ -450,6 +540,10 @@ func (c Config) PalWorldSettingsPath() string {
 	if runtime.GOOS == "linux" {
 		platform = "LinuxServer"
 	}
+	return c.PalWorldSettingsPathFor(platform)
+}
+
+func (c Config) PalWorldSettingsPathFor(platform string) string {
 	return filepath.Join(c.ServerDirectory(), "Pal", "Saved", "Config", platform, "PalWorldSettings.ini")
 }
 
@@ -582,6 +676,14 @@ func validateHTTPBaseURL(name, raw string) error {
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("%s must use HTTPS, except for loopback HTTP endpoints", name)
+	}
+	return nil
+}
+
+func validateHTTPSBaseURL(name, raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s entries must be absolute HTTPS URLs without credentials, query, or fragment", name)
 	}
 	return nil
 }

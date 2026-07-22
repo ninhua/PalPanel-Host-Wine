@@ -67,6 +67,14 @@ describe('Setup', () => {
     tasksApiMock.getJobs.mockResolvedValue([]);
   });
 
+  it('offers the host wine runtime without requiring Docker', async () => {
+    render(<Setup />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /高级设置/ }));
+    expect(await screen.findByRole('button', { name: /Host Wine/ })).toBeInTheDocument();
+    expect(screen.getByText(/无需 Docker daemon/)).toBeInTheDocument();
+  });
+
   it('shows a prominent manual Docker command on Linux without sudo', async () => {
     render(<Setup />);
 

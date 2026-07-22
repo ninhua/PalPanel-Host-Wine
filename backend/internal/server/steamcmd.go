@@ -11,14 +11,22 @@ import (
 	"palpanel/internal/steamcmd"
 )
 
-func (m Manager) nativeSteamCMD() *steamcmd.Client {
-	client := steamcmd.New(m.cfg)
+func (m Manager) nativeSteamCMD(platforms ...string) *steamcmd.Client {
+	platform := "windows"
+	if len(platforms) > 0 && platforms[0] == "linux" {
+		platform = "linux"
+	}
+	client := steamcmd.NewForPlatform(m.cfg, platform)
 	client.SetHTTPClient(m.downloadClient)
 	return client
 }
 
-func (m Manager) ensureSteamCMD(ctx context.Context) error {
-	return m.nativeSteamCMD().Ensure(ctx)
+func (m Manager) ensureSteamCMD(ctx context.Context, modes ...string) error {
+	platform := "windows"
+	if len(modes) > 0 && modes[0] == RuntimeLinuxSteamCMD {
+		platform = "linux"
+	}
+	return m.nativeSteamCMD(platform).Ensure(ctx)
 }
 
 func (m Manager) installOrUpdateWindows(ctx context.Context) error {
@@ -27,7 +35,7 @@ func (m Manager) installOrUpdateWindows(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := m.nativeSteamCMD().InstallOrUpdate(ctx, palworldServerAppID, m.cfg.ServerDirectory()); err != nil {
+	if err := m.nativeSteamCMD("windows").InstallOrUpdate(ctx, palworldServerAppID, m.cfg.ServerDirectory()); err != nil {
 		return err
 	}
 	return m.validateWindowsServerInstall()
@@ -42,7 +50,7 @@ func (m Manager) installOrUpdateLinux(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := m.nativeSteamCMD().InstallOrUpdate(ctx, palworldServerAppID, m.cfg.ServerDirectory()); err != nil {
+	if err := m.nativeSteamCMD("linux").InstallOrUpdate(ctx, palworldServerAppID, m.cfg.ServerDirectory()); err != nil {
 		return err
 	}
 	return m.validateLinuxServerInstall()

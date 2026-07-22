@@ -161,7 +161,7 @@ func (m Manager) RuntimeMode(ctx context.Context) (string, error) {
 	if !ok || strings.TrimSpace(mode) == "" {
 		return RecommendedRuntimeForOS(runtime.GOOS), nil
 	}
-	if mode != RuntimeWineDocker && mode != RuntimeWindowsSteamCMD && mode != RuntimeLinuxSteamCMD {
+	if !IsRuntimeModeSupported(mode) {
 		return RecommendedRuntimeForOS(runtime.GOOS), nil
 	}
 	return mode, nil
@@ -169,7 +169,7 @@ func (m Manager) RuntimeMode(ctx context.Context) (string, error) {
 
 func (m Manager) SetRuntimeMode(ctx context.Context, mode string) error {
 	mode = strings.TrimSpace(mode)
-	if mode != RuntimeWineDocker && mode != RuntimeWindowsSteamCMD && mode != RuntimeLinuxSteamCMD {
+	if !IsRuntimeModeSupported(mode) {
 		return fmt.Errorf("unsupported runtime mode: %s", mode)
 	}
 	return m.store.SetKV(ctx, kvRuntimeMode, mode)
@@ -223,6 +223,16 @@ func (m Manager) Prerequisites(ctx context.Context) ([]Prerequisite, error) {
 		checks = append(checks,
 			Prerequisite{ID: "docker", Label: "Docker CLI", OK: cliOK, Required: true, Message: cliMessage},
 			Prerequisite{ID: "docker_daemon", Label: "Docker daemon", OK: dockerCapability.DaemonReachable, Required: true, Message: daemonMessage},
+		)
+	} else if mode == RuntimeHostWine {
+		winePath, wineErr := exec.LookPath(m.cfg.WineBinary)
+		if winePath == "" {
+			winePath = m.cfg.WineBinary
+		}
+		checks = append(checks,
+			Prerequisite{ID: "linux", Label: "Linux host", OK: runtime.GOOS == "linux", Required: true, Message: runtime.GOOS},
+			Prerequisite{ID: "wine", Label: "Wine 64-bit", OK: wineErr == nil, Required: true, Message: winePath},
+			Prerequisite{ID: "wineprefix", Label: "PalServer Wine prefix", OK: strings.TrimSpace(m.cfg.WinePrefixDir) != "", Required: true, Message: m.cfg.WinePrefixDir},
 		)
 	} else if mode == RuntimeWindowsSteamCMD {
 		steamCMDErr := validatePEExecutable(m.cfg.SteamCMDBinaryPath())
@@ -336,10 +346,10 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 			return false
 		}
 	}
-	if mode == RuntimeWindowsSteamCMD || mode == RuntimeLinuxSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine || mode == RuntimeLinuxSteamCMD {
 		m.update(jobID, "running", 25, "preparing SteamCMD", "")
 		if m.installOrUpdateFunc == nil {
-			if err := m.ensureSteamCMD(ctx); err != nil {
+			if err := m.ensureSteamCMD(ctx, mode); err != nil {
 				m.update(jobID, "failed", 25, "steamcmd setup failed", err.Error())
 				return false
 			}
@@ -367,7 +377,7 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 			return false
 		}
 	}
-	if mode == RuntimeWindowsSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		if err := m.validateWindowsServerInstall(); err != nil {
 			m.update(jobID, "failed", 70, action+" verification failed", err.Error()+retainedBackupMessage(backup))
 			return false
@@ -496,6 +506,11 @@ func (m Manager) startUnlocked(ctx context.Context) error {
 	}
 	if mode == RuntimeWindowsSteamCMD {
 		err = m.startWindows(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeHostWine {
+		if err := m.preflightHostWineSaveGames(ctx); err != nil {
+			return fmt.Errorf("SaveGames preflight failed: %w", err)
+		}
+		err = m.startHostWine(ctx, startup.Args(m.cfg))
 	} else if mode == RuntimeLinuxSteamCMD {
 		err = m.startLinux(ctx, startup.Args(m.cfg))
 	} else {
@@ -539,6 +554,9 @@ func (m Manager) stopUnlocked(ctx context.Context) error {
 	if mode == RuntimeWindowsSteamCMD {
 		return m.stopWindows(ctx)
 	}
+	if mode == RuntimeHostWine {
+		return m.stopHostWine(ctx)
+	}
 	if mode == RuntimeLinuxSteamCMD {
 		return m.stopLinux(ctx)
 	}
@@ -565,6 +583,11 @@ func (m Manager) restartUnlocked(ctx context.Context) error {
 			return fmt.Errorf("stop before restart: %w", err)
 		}
 		err = m.startWindows(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeHostWine {
+		if err := m.stopHostWine(ctx); err != nil {
+			return fmt.Errorf("stop before restart: %w", err)
+		}
+		err = m.startHostWine(ctx, startup.Args(m.cfg))
 	} else if mode == RuntimeLinuxSteamCMD {
 		if err := m.stopLinux(ctx); err != nil {
 			return fmt.Errorf("stop before restart: %w", err)
@@ -678,6 +701,8 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 			statusErr = err
 			container = docker.ContainerStatus{Exists: false, Status: "error"}
 		}
+	} else if mode == RuntimeHostWine {
+		container, statusErr = m.hostWineStatus(ctx)
 	} else if mode == RuntimeLinuxSteamCMD {
 		container, statusErr = m.linuxStatus(ctx)
 	} else {
@@ -894,7 +919,7 @@ func (m Manager) installOrUpdateRuntime(ctx context.Context, mode string) error 
 	if m.installOrUpdateFunc != nil {
 		return m.installOrUpdateFunc(ctx, mode)
 	}
-	if mode == RuntimeWindowsSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		return m.installOrUpdateWindows(ctx)
 	}
 	if mode == RuntimeLinuxSteamCMD {

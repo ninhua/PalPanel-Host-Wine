@@ -40,6 +40,7 @@ const fallbackStatus: PalDefenderStatus = {
   load_verified: false,
   ue4ss: {
     state: 'not_checked',
+    channel: 'stable',
     installed: false,
     compatible: false,
     files: {},
@@ -65,6 +66,10 @@ const mapUE4SS = (raw: unknown): UE4SSDependencyStatus => {
   const rawState = String(data.state || 'not_checked') as UE4SSDependencyState;
   return {
     state: dependencyStates.has(rawState) ? rawState : 'not_checked',
+    channel:
+      data.channel === 'experimental-palworld' || data.channel === 'custom'
+        ? data.channel
+        : 'stable',
     installed: Boolean(data.installed),
     version: data.version ? String(data.version) : undefined,
     compatible: Boolean(data.compatible),

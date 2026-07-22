@@ -61,27 +61,34 @@ func TestRebuildWritesCacheAndCurrentReadsIt(t *testing.T) {
 	}
 }
 
-func TestCurrentDoesNotRebuildWhenCacheMissing(t *testing.T) {
+func TestCurrentAutomaticallyRebuildsWhenCacheMissing(t *testing.T) {
 	root, cfg := testConfig(t)
 	writeWorld(t, root, "level-one")
 	sidecarCalled := false
 	sidecar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sidecarCalled = true
-		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"data": map[string]any{
+				"version": 1, "generated_at": "2026-07-09T00:00:00Z", "parser": "test",
+				"warnings": []string{}, "players": []map[string]any{}, "guilds": []map[string]any{},
+				"bases": []map[string]any{}, "pals": []map[string]any{}, "containers": []map[string]any{}, "map_entities": []map[string]any{},
+			},
+		})
 	}))
 	defer sidecar.Close()
 	cfg.SaveIndexerURL = sidecar.URL
 
 	m := NewManager(cfg)
 	index, status, err := m.Current(t.Context())
-	if err == nil {
-		t.Fatal("expected Current to report missing cache")
+	if err != nil {
+		t.Fatalf("Current returned error: %v", err)
 	}
-	if status.State != "not_indexed" || len(index.Players) != 0 {
+	if status.State != "ready" || len(index.Players) != 0 {
 		t.Fatalf("unexpected current result: status=%#v index=%#v", status, index)
 	}
-	if sidecarCalled {
-		t.Fatal("Current should not call the sidecar indexer on cache miss")
+	if !sidecarCalled {
+		t.Fatal("Current did not automatically call the sidecar indexer on cache miss")
 	}
 }
 
@@ -155,6 +162,22 @@ func TestRebuildFailureKeepsStaleCache(t *testing.T) {
 	if !status.Stale || status.State != "error" || len(index.Players) != 1 {
 		t.Fatalf("expected stale cached index after failure, got status=%#v index=%#v", status, index)
 	}
+	index, status, err = m.Current(t.Context())
+	if err != nil || !status.Stale || status.State != "error" || len(index.Players) != 1 || index.Players[0].Nickname != "Tester" {
+		t.Fatalf("Current did not preserve the last successful cache after automatic rebuild failed: err=%v status=%#v index=%#v", err, status, index)
+	}
+	if !containsSubstring(index.Warnings, "automatic save index rebuild failed") {
+		t.Fatalf("automatic rebuild failure warning is missing: %#v", index.Warnings)
+	}
+}
+
+func containsSubstring(values []string, expected string) bool {
+	for _, value := range values {
+		if strings.Contains(value, expected) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRebuildNeverReturnsRawBinarySidecarPayload(t *testing.T) {
@@ -241,9 +264,9 @@ func TestLoadCacheUsesMemoryUntilFileMTimeChanges(t *testing.T) {
 	if err := os.Chtimes(cachePath, later, later); err != nil {
 		t.Fatalf("advance cache mtime: %v", err)
 	}
-	_, _, err = m.Current(t.Context())
-	if err == nil || errors.Is(err, ErrDisabled) {
-		t.Fatalf("expected changed cache mtime to invalidate memory cache, got %v", err)
+	index, status, err := m.Current(t.Context())
+	if err != nil || errors.Is(err, ErrDisabled) || status.State != "ready" || index.Players[0].Nickname != "Tester" {
+		t.Fatalf("expected changed cache mtime to trigger automatic rebuild, got err=%v status=%#v index=%#v", err, status, index)
 	}
 }
 

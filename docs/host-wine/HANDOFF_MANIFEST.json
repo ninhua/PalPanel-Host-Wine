@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-07-22",
+  "palpanel": {
+    "repository": "https://github.com/uitok/palworld-panel",
+    "baseline_version": "v1.2.1",
+    "snapshot_commit": "b0b3806e6c49610f43d96af361412a348f6a653d"
+  },
+  "palops_web": {
+    "repository": "https://github.com/CoderYiXin/PalOpsWeb",
+    "baseline_version": "1.2.0",
+    "snapshot_commit": "b51bd84a76ae0e83442feaa8c6bffc1b97e5d119"
+  },
+  "startup_script": {
+    "filename": "palworld-panel-start-fixed-v1.0.36.sh",
+    "version": "1.0.36",
+    "sha256": "8f5e3daacccae9b4c233fe08f93a754135a17b55bc22035305dc97fa63a621db",
+    "size_bytes": 181782
+  },
+  "target_repository": null,
+  "note": "TARGET_REPO must be filled before Codex performs writes."
+}

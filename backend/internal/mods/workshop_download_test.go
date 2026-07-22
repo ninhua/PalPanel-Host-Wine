@@ -60,7 +60,7 @@ func TestRunWorkshopImportUsesNativeSteamCMDForWindowsRuntime(t *testing.T) {
 	manager.native = fake
 	job, directory := newWorkshopImportJob(t, manager, store, "native-workshop")
 
-	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, WorkshopItem{ID: "123456789"}, directory)
+	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, true, WorkshopItem{ID: "123456789"}, directory)
 	completed, err := store.GetJob(t.Context(), job.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +77,27 @@ func TestRunWorkshopImportUsesNativeSteamCMDForWindowsRuntime(t *testing.T) {
 	}
 }
 
+func TestHostWineWorkshopDefaultsToAnonymousNativeSteamCMD(t *testing.T) {
+	manager, store := newImportTestManager(t)
+	if err := store.SetKV(t.Context(), "runtime_mode", server.RuntimeHostWine); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeNativeWorkshopDownloader{download: func(_, _, _, accountName string) error {
+		if accountName != "" {
+			t.Fatalf("anonymous Host Wine download received account %q", accountName)
+		}
+		return nil
+	}}
+	manager.native = fake
+	destination := filepath.Join(manager.cfg.RuntimeRoot, "mods", "staging", "anonymous")
+	if err := manager.downloadWorkshopTo(t.Context(), "job", "123456789", destination, false); err != nil {
+		t.Fatal(err)
+	}
+	if fake.ensureCalls != 1 || fake.downloadCalls != 1 {
+		t.Fatalf("native calls = ensure %d download %d", fake.ensureCalls, fake.downloadCalls)
+	}
+}
+
 func TestRunWorkshopImportDoesNotReportIncompleteNativeDownloadAsSuccess(t *testing.T) {
 	manager, store := newImportTestManager(t)
 	if err := store.SetKV(t.Context(), "runtime_mode", server.RuntimeWindowsSteamCMD); err != nil {
@@ -85,7 +106,7 @@ func TestRunWorkshopImportDoesNotReportIncompleteNativeDownloadAsSuccess(t *test
 	manager.native = &fakeNativeWorkshopDownloader{}
 	job, directory := newWorkshopImportJob(t, manager, store, "incomplete-workshop")
 
-	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, WorkshopItem{}, directory)
+	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, false, WorkshopItem{}, directory)
 	failed, err := store.GetJob(t.Context(), job.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +129,7 @@ func TestRunWorkshopImportKeepsDockerWineBranch(t *testing.T) {
 	manager.native = fake
 	job, directory := newWorkshopImportJob(t, manager, store, "wine-workshop")
 
-	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, WorkshopItem{}, directory)
+	manager.runWorkshopImport(t.Context(), job.ID, "123456789", false, false, WorkshopItem{}, directory)
 	failed, err := store.GetJob(t.Context(), job.ID)
 	if err != nil {
 		t.Fatal(err)

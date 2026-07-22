@@ -103,7 +103,7 @@ func (m Manager) ImportServerDirectory(ctx context.Context, input string) (Serve
 		Path:          path,
 		ManifestPath:  manifest,
 		BuildID:       buildID,
-		ConfigExists:  fileExists(m.cfg.PalWorldSettingsPath()),
+		ConfigExists:  fileExists(m.cfg.PalWorldSettingsPathFor("WindowsServer")),
 		AlreadyBound:  alreadyBound,
 		OriginalInput: input,
 	}, nil

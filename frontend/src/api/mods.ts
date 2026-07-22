@@ -404,9 +404,9 @@ export const modsApi = {
       { map: mapTranslation, quiet: true, fallbackOnError: false },
     ),
 
-  downloadWorkshop: (itemId: string, enable = false) =>
+  downloadWorkshop: (itemId: string, enable = false, useSteamAccount = false) =>
     handleRequest<unknown, Job>(
-      () => apiClient.post('/mods/workshop', { item_id: itemId, enable }),
+      () => apiClient.post('/mods/workshop', { item_id: itemId, enable, use_steam_account: useSteamAccount }),
       createFallbackJob('workshop_download', '已提交 Workshop 下载任务'),
       { map: mapJob, quiet: true, fallbackOnError: false },
     ),
