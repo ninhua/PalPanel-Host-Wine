@@ -15,6 +15,15 @@ func TestHostWineLifecycleUsesDedicatedSessionAndRecoversStatus(t *testing.T) {
 	fakeWine := filepath.Join(t.TempDir(), "wine64")
 	script := `#!/bin/bash
 set -eu
+if [[ "${1:-}" == "cmd.exe" ]]; then
+  batch="${4#Z:}"
+  batch="/${batch//\\//}"
+  destination="$(sed -n 's/^set "DEST=\(.*\)"$/\1/p' "$batch")"
+  destination="/${destination#Z:\\}"
+  destination="${destination//\\//}"
+  printf 'new-24\r\n' > "$destination"
+  exit 0
+fi
 server_dir="$(dirname "$1")"
 shipping="$server_dir/Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"
 exec -a "$shipping" sleep 120

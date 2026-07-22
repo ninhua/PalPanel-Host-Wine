@@ -488,6 +488,9 @@ func (m Manager) startUnlocked(ctx context.Context) error {
 	if mode == RuntimeWindowsSteamCMD {
 		err = m.startWindows(ctx, startup.Args(m.cfg))
 	} else if mode == RuntimeHostWine {
+		if err := m.preflightHostWineSaveGames(ctx); err != nil {
+			return fmt.Errorf("SaveGames preflight failed: %w", err)
+		}
 		err = m.startHostWine(ctx, startup.Args(m.cfg))
 	} else {
 		err = m.runner.StartWithArgs(ctx, startup.Args(m.cfg))
