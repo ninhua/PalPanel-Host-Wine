@@ -18,6 +18,7 @@ import (
 
 	"palpanel/internal/appconfig"
 	"palpanel/internal/db"
+	"palpanel/internal/downloadclient"
 	"palpanel/internal/id"
 	"palpanel/internal/jobs"
 )
@@ -111,7 +112,7 @@ func newImportRegistry(cfg appconfig.Config) *importRegistry {
 		records:       map[string]*importRecord{},
 		root:          root,
 		now:           time.Now,
-		downloader:    newSafeDownloader(),
+		downloader:    newSafeDownloader(cfg),
 		githubAPIBase: "https://api.github.com",
 		maxBytes:      limit,
 		cfg:           cfg,
@@ -289,7 +290,7 @@ func (m Manager) inspectGitHub(ctx context.Context, record *importRecord, parsed
 		releaseEndpoint = strings.TrimRight(m.imports.githubAPIBase, "/") + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/releases/tags/" + url.PathEscape(tag)
 	}
 	metadataPath := filepath.Join(record.directory, "release.json")
-	if _, err := m.imports.downloader.Download(ctx, releaseEndpoint, metadataPath, githubMetadataLimit); err != nil {
+	if _, err := m.imports.downloader.Download(ctx, releaseEndpoint, metadataPath, githubMetadataLimit, false, nil); err != nil {
 		return ImportFailure{Code: "github_release_failed", Err: err}
 	}
 	body, err := os.ReadFile(metadataPath)
@@ -343,7 +344,7 @@ func (m Manager) prepareArchiveCandidate(ctx context.Context, record *importReco
 		return err
 	}
 	archivePath := filepath.Join(directory, "archive.zip")
-	size, err := m.imports.downloader.Download(ctx, candidate.downloadURL, archivePath, m.imports.maxBytes)
+	size, err := m.imports.downloader.Download(ctx, candidate.downloadURL, archivePath, m.imports.maxBytes, true, downloadclient.ValidateZIP)
 	if err != nil {
 		return ImportFailure{Code: "download_failed", Err: err}
 	}

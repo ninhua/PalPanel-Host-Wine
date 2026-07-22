@@ -17,6 +17,29 @@ func TestLoadRequiresAuthenticationByDefault(t *testing.T) {
 	}
 }
 
+func TestLoadUsesOrderedGitHubDownloadFallbacks(t *testing.T) {
+	t.Setenv("PALPANEL_GITHUB_PROXY_BASES", "")
+	t.Setenv("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS", "")
+	t.Setenv("PALPANEL_DOWNLOAD_RETRIES", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.GitHubProxyBases) != 2 || cfg.GitHubProxyBases[0] != "https://v4.gh-proxy.org" || cfg.GitHubProxyBases[1] != "https://cdn.gh-proxy.org" {
+		t.Fatalf("GitHubProxyBases = %#v", cfg.GitHubProxyBases)
+	}
+	if cfg.DownloadTimeoutSeconds != DefaultDownloadTimeoutSeconds || cfg.DownloadRetries != DefaultDownloadRetries {
+		t.Fatalf("download policy = timeout %d, retries %d", cfg.DownloadTimeoutSeconds, cfg.DownloadRetries)
+	}
+}
+
+func TestLoadRejectsUnsafeGitHubProxy(t *testing.T) {
+	t.Setenv("PALPANEL_GITHUB_PROXY_BASES", "http://127.0.0.1:8080,https://cdn.example")
+	if _, err := Load(); err == nil {
+		t.Fatal("unsafe GitHub proxy was accepted")
+	}
+}
+
 func TestLoadAllowsExplicitDevNoAuth(t *testing.T) {
 	t.Setenv("PALPANEL_REQUIRE_AUTH", "false")
 	t.Setenv("STEAM_WEB_API_KEY", "steam-key")

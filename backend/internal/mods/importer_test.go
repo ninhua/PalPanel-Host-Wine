@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"net"
-	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +15,15 @@ import (
 	"palpanel/internal/appconfig"
 	"palpanel/internal/db"
 	"palpanel/internal/docker"
+	"palpanel/internal/downloadclient"
 	"palpanel/internal/jobs"
 )
+
+type downloadStub func(downloadclient.Request) (downloadclient.Result, error)
+
+func (stub downloadStub) Download(_ context.Context, request downloadclient.Request) (downloadclient.Result, error) {
+	return stub(request)
+}
 
 func TestLocalImportInstallsDisabledAndUpdatesByPackageName(t *testing.T) {
 	manager, store := newImportTestManager(t)
@@ -151,27 +156,34 @@ func TestGitHubReleaseRequiresSelectionForMultipleZipAssets(t *testing.T) {
 	manager, _ := newImportTestManager(t)
 	zipOne := modArchive(t, "GitHub One", "GitHubOne", "1", "one")
 	zipTwo := modArchive(t, "GitHub Two", "GitHubTwo", "1", "two")
-	manager.imports.downloader.resolver = staticResolver{
-		"api.github.com":    {{IP: net.ParseIP("8.8.8.8")}},
-		"downloads.example": {{IP: net.ParseIP("8.8.4.4")}},
-	}
-	redirectCheck := manager.imports.downloader.client.CheckRedirect
-	manager.imports.downloader.client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	manager.imports.downloader.client = downloadStub(func(request downloadclient.Request) (downloadclient.Result, error) {
 		var body []byte
-		switch request.URL.Hostname() {
+		parsed, err := url.Parse(request.URL)
+		if err != nil {
+			return downloadclient.Result{}, err
+		}
+		switch parsed.Hostname() {
 		case "api.github.com":
 			body = []byte(`{"assets":[{"name":"one.zip","size":100,"browser_download_url":"https://downloads.example/one.zip"},{"name":"two.zip","size":200,"browser_download_url":"https://downloads.example/two.zip"},{"name":"notes.txt","browser_download_url":"https://downloads.example/notes.txt"}]}`)
 		case "downloads.example":
-			if strings.HasSuffix(request.URL.Path, "one.zip") {
+			if strings.HasSuffix(parsed.Path, "one.zip") {
 				body = zipOne
 			} else {
 				body = zipTwo
 			}
 		default:
-			return nil, errors.New("unexpected URL")
+			return downloadclient.Result{}, errors.New("unexpected URL")
 		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Request: request}, nil
-	}), CheckRedirect: redirectCheck}
+		if err := os.WriteFile(request.Destination, body, 0o600); err != nil {
+			return downloadclient.Result{}, err
+		}
+		if request.Validate != nil {
+			if err := request.Validate(request.Destination); err != nil {
+				return downloadclient.Result{}, err
+			}
+		}
+		return downloadclient.Result{Size: int64(len(body))}, nil
+	})
 
 	inspection, err := manager.InspectSource(context.Background(), "https://github.com/example/project/releases/latest")
 	if err != nil {

@@ -27,6 +27,13 @@ const DefaultUE4SSArchiveSHA256 = "4b47d4bceddd2f561a4e395bfa00924ccfc945af576a2
 const DefaultUE4SSDownloadMaxMB = 64
 const DefaultAITranslationTimeoutSeconds = 90
 const DefaultMonitorRetentionDays = 7
+const DefaultDownloadTimeoutSeconds = 300
+const DefaultDownloadRetries = 2
+
+var DefaultGitHubProxyBases = []string{
+	"https://v4.gh-proxy.org",
+	"https://cdn.gh-proxy.org",
+}
 
 var DefaultDockerRunnerBaseImageMirrorPrefixes = []string{
 	"docker.m.daocloud.io",
@@ -54,6 +61,7 @@ type Config struct {
 	UploadsDir                   string
 	BackupsDir                   string
 	LogsDir                      string
+	DownloadCacheDir             string
 	DBPath                       string
 	RequireAuth                  bool
 	CORSOrigins                  []string
@@ -75,6 +83,9 @@ type Config struct {
 	UE4SSDownloadURL             string
 	UE4SSArchiveSHA256           string
 	UE4SSDownloadMaxBytes        int64
+	GitHubProxyBases             []string
+	DownloadTimeoutSeconds       int
+	DownloadRetries              int
 	WorkshopAppID                string
 	GamePort                     int
 	QueryPort                    int
@@ -188,6 +199,7 @@ func Load() (Config, error) {
 	logsDefault := ""
 	dbDefault := ""
 	saveIndexDefault := ""
+	downloadCacheDefault := ""
 	winePrefixDefault := ""
 	steamCMDWinePrefixDefault := ""
 	if layout.Structured {
@@ -202,6 +214,7 @@ func Load() (Config, error) {
 		logsDefault = filepath.Join(dataDefault, "logs")
 		dbDefault = filepath.Join(dataDefault, "database", "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDefault, "save-index")
+		downloadCacheDefault = filepath.Join(dataDefault, "cache", "downloads")
 		winePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix")
 		steamCMDWinePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix-steamcmd")
 	}
@@ -219,6 +232,7 @@ func Load() (Config, error) {
 		logsDefault = filepath.Join(dataDir, "logs")
 		dbDefault = filepath.Join(dataDir, "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDir, "save-index")
+		downloadCacheDefault = filepath.Join(dataDir, "cache", "downloads")
 		winePrefixDefault = filepath.Join(dataDir, "wineprefix")
 		steamCMDWinePrefixDefault = filepath.Join(dataDir, "wineprefix-steamcmd")
 	}
@@ -266,6 +280,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	downloadCacheDir, err := configuredPath("PALPANEL_DOWNLOAD_CACHE_DIR", downloadCacheDefault, mutableBase)
+	if err != nil {
+		return Config{}, err
+	}
 	backendDir, err := configuredPath("PALPANEL_BACKEND_DIR", filepath.Join(root, "backend"), root)
 	if err != nil {
 		return Config{}, err
@@ -297,6 +315,7 @@ func Load() (Config, error) {
 		UploadsDir:                   uploadsDir,
 		BackupsDir:                   backupsDir,
 		LogsDir:                      logsDir,
+		DownloadCacheDir:             downloadCacheDir,
 		DBPath:                       dbPath,
 		RequireAuth:                  envBool("PALPANEL_REQUIRE_AUTH", true),
 		CORSOrigins:                  envList("PALPANEL_CORS_ORIGINS", []string{"http://127.0.0.1:3000", "http://localhost:3000"}),
@@ -318,6 +337,9 @@ func Load() (Config, error) {
 		UE4SSDownloadURL:             strings.TrimSpace(env("PALPANEL_UE4SS_DOWNLOAD_URL", DefaultUE4SSDownloadURL)),
 		UE4SSArchiveSHA256:           strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_ARCHIVE_SHA256", DefaultUE4SSArchiveSHA256))),
 		UE4SSDownloadMaxBytes:        int64(envInt("PALPANEL_UE4SS_DOWNLOAD_MAX_MB", DefaultUE4SSDownloadMaxMB)) * 1024 * 1024,
+		GitHubProxyBases:             envList("PALPANEL_GITHUB_PROXY_BASES", DefaultGitHubProxyBases),
+		DownloadTimeoutSeconds:       envInt("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS", DefaultDownloadTimeoutSeconds),
+		DownloadRetries:              envInt("PALPANEL_DOWNLOAD_RETRIES", DefaultDownloadRetries),
 		WorkshopAppID:                env("PALPANEL_WORKSHOP_APP_ID", "1623730"),
 		GamePort:                     envInt("PALPANEL_GAME_PORT", 8211),
 		QueryPort:                    envInt("PALPANEL_QUERY_PORT", 27015),
@@ -379,6 +401,21 @@ func Load() (Config, error) {
 	if cfg.UE4SSDownloadMaxBytes < 1*1024*1024 || cfg.UE4SSDownloadMaxBytes > 1024*1024*1024 {
 		return Config{}, fmt.Errorf("PALPANEL_UE4SS_DOWNLOAD_MAX_MB must be between 1 and 1024")
 	}
+	if len(cfg.GitHubProxyBases) != len(DefaultGitHubProxyBases) {
+		return Config{}, fmt.Errorf("PALPANEL_GITHUB_PROXY_BASES must contain the primary and fallback proxy URLs")
+	}
+	for index, proxyBase := range cfg.GitHubProxyBases {
+		if err := validateHTTPSBaseURL("PALPANEL_GITHUB_PROXY_BASES", proxyBase); err != nil {
+			return Config{}, err
+		}
+		cfg.GitHubProxyBases[index] = strings.TrimRight(proxyBase, "/")
+	}
+	if cfg.DownloadTimeoutSeconds < 10 || cfg.DownloadTimeoutSeconds > 3600 {
+		return Config{}, fmt.Errorf("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS must be between 10 and 3600")
+	}
+	if cfg.DownloadRetries < 1 || cfg.DownloadRetries > 5 {
+		return Config{}, fmt.Errorf("PALPANEL_DOWNLOAD_RETRIES must be between 1 and 5")
+	}
 	if cfg.AITranslationTimeoutSeconds < 1 || cfg.AITranslationTimeoutSeconds > 600 {
 		return Config{}, fmt.Errorf("PALPANEL_AI_TRANSLATION_TIMEOUT_SECONDS must be between 1 and 600")
 	}
@@ -417,7 +454,7 @@ func (c Config) EnsureDirs() error {
 			return err
 		}
 	}
-	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.SteamCMDWinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
+	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.SteamCMDWinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.DownloadCacheDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
 	for _, dir := range dirs {
 		if strings.TrimSpace(dir) == "" {
 			continue
@@ -576,6 +613,14 @@ func validateHTTPBaseURL(name, raw string) error {
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("%s must use HTTPS, except for loopback HTTP endpoints", name)
+	}
+	return nil
+}
+
+func validateHTTPSBaseURL(name, raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s entries must be absolute HTTPS URLs without credentials, query, or fragment", name)
 	}
 	return nil
 }
