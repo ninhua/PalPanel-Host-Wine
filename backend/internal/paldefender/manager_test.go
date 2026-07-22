@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +18,53 @@ import (
 
 	"palpanel/internal/appconfig"
 	"palpanel/internal/db"
+	"palpanel/internal/downloadclient"
 )
+
+type testHTTPDownloader struct{}
+
+type downloadFunc func(context.Context, downloadclient.Request) (downloadclient.Result, error)
+
+func (function downloadFunc) Download(ctx context.Context, request downloadclient.Request) (downloadclient.Result, error) {
+	return function(ctx, request)
+}
+
+func (testHTTPDownloader) Download(ctx context.Context, request downloadclient.Request) (downloadclient.Result, error) {
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, request.URL, nil)
+	if err != nil {
+		return downloadclient.Result{}, err
+	}
+	response, err := http.DefaultClient.Do(httpRequest)
+	if err != nil {
+		return downloadclient.Result{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return downloadclient.Result{}, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, request.MaxBytes+1))
+	if err != nil || int64(len(body)) > request.MaxBytes {
+		return downloadclient.Result{}, fmt.Errorf("invalid download size: %w", err)
+	}
+	if request.SHA256 != "" {
+		sum := sha256.Sum256(body)
+		if !strings.EqualFold(hex.EncodeToString(sum[:]), request.SHA256) {
+			return downloadclient.Result{}, fmt.Errorf("SHA-256 mismatch")
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(request.Destination), 0o755); err != nil {
+		return downloadclient.Result{}, err
+	}
+	if err := os.WriteFile(request.Destination, body, 0o600); err != nil {
+		return downloadclient.Result{}, err
+	}
+	if request.Validate != nil {
+		if err := request.Validate(request.Destination); err != nil {
+			return downloadclient.Result{}, err
+		}
+	}
+	return downloadclient.Result{Size: int64(len(body))}, nil
+}
 
 func TestInstallReleaseFromZip(t *testing.T) {
 	zipBytes := makePalDefenderZip(t)
@@ -102,6 +150,40 @@ func TestInstallReleasePrefersDirectGitHubAssets(t *testing.T) {
 	}
 }
 
+func TestInstallReleaseFallsBackToZipWhenDirectAssetFails(t *testing.T) {
+	zipBytes := makePalDefenderZip(t)
+	zipSum := sha256.Sum256(zipBytes)
+	loader := []byte("direct-loader")
+	loaderSum := sha256.Sum256(loader)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/d3d9.dll":
+			_, _ = w.Write(loader)
+		case "/PalDefender.dll":
+			http.Error(w, "release CDN unavailable", http.StatusBadGateway)
+		case "/PalDefender.zip":
+			_, _ = w.Write(zipBytes)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	manager, cleanup := testManager(t)
+	defer cleanup()
+	release := Release{Assets: []Asset{
+		{Name: "d3d9.dll", Digest: "sha256:" + hex.EncodeToString(loaderSum[:]), BrowserDownloadURL: server.URL + "/d3d9.dll"},
+		{Name: "PalDefender.dll", Digest: "sha256:" + strings.Repeat("0", 64), BrowserDownloadURL: server.URL + "/PalDefender.dll"},
+		{Name: "PalDefender.zip", Digest: "sha256:" + hex.EncodeToString(zipSum[:]), BrowserDownloadURL: server.URL + "/PalDefender.zip"},
+	}}
+	if err := manager.installRelease(t.Context(), release); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(manager.cfg.Win64Dir(), "PalDefender.dll"))
+	if err != nil || string(body) != "paldefender" {
+		t.Fatalf("fallback asset = %q, %v", body, err)
+	}
+}
+
 func TestInstallReleaseRollsBackWhenSecondDLLCannotBeReplaced(t *testing.T) {
 	zipBytes := makePalDefenderZip(t)
 	sum := sha256.Sum256(zipBytes)
@@ -155,6 +237,37 @@ func TestReleaseVersionUsesGitHubTag(t *testing.T) {
 	}
 	if got := releaseVersion(Release{Name: "1.8.3"}); got != "" {
 		t.Fatalf("releaseVersion should require tag_name, got %q", got)
+	}
+}
+
+func TestLatestUsesConfiguredReleaseAPIBase(t *testing.T) {
+	manager, cleanup := testManager(t)
+	defer cleanup()
+	manager.releaseAPIBase = "https://releases.example/paldefender"
+	manager.downloads = downloadFunc(func(_ context.Context, request downloadclient.Request) (downloadclient.Result, error) {
+		if request.URL != "https://releases.example/paldefender/latest" {
+			t.Fatalf("release URL = %q", request.URL)
+		}
+		body := []byte(`{"tag_name":"v1.2.3","assets":[]}`)
+		if err := os.WriteFile(request.Destination, body, 0o600); err != nil {
+			return downloadclient.Result{}, err
+		}
+		return downloadclient.Result{Size: int64(len(body))}, nil
+	})
+	release, err := manager.Latest(t.Context())
+	if err != nil || release.TagName != "v1.2.3" {
+		t.Fatalf("latest release = %#v, %v", release, err)
+	}
+}
+
+func TestStatusDoesNotDependOnReleaseAPI(t *testing.T) {
+	manager, cleanup := testManager(t)
+	defer cleanup()
+	manager.downloads = downloadFunc(func(context.Context, downloadclient.Request) (downloadclient.Result, error) {
+		return downloadclient.Result{}, fmt.Errorf("GitHub returned HTTP 403")
+	})
+	if _, err := manager.Status(t.Context()); err != nil {
+		t.Fatalf("local status was blocked by release API: %v", err)
 	}
 }
 
@@ -338,7 +451,9 @@ func testManager(t *testing.T) (Manager, func()) {
 	if err != nil {
 		t.Fatalf("db.Open returned error: %v", err)
 	}
-	return NewManager(cfg, store), func() { _ = store.Close() }
+	manager := NewManager(cfg, store)
+	manager.downloads = testHTTPDownloader{}
+	return manager, func() { _ = store.Close() }
 }
 
 func makePalDefenderZip(t *testing.T) []byte {

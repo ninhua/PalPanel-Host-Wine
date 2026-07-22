@@ -17,6 +17,8 @@ import (
 const DefaultDockerRunnerBaseImage = "scottyhardy/docker-wine:latest@sha256:477aae36af41923cfb5eefb23923b035f8010caa49eaded952316f937dd8a49b"
 const DefaultRCONPort = 25575
 const DefaultPalDefenderRESTPort = 17993
+const DefaultPalDefenderReleaseAPIBaseURL = "https://api.github.com/repos/Ultimeit/PalDefender/releases"
+const DefaultPalDefenderDownloadMaxMB = 64
 const DefaultSteamAPIBaseURL = "https://api.steampowered.com"
 const DefaultSteamAPITimeoutSeconds = 15
 const DefaultSteamCMDDownloadURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
@@ -100,6 +102,8 @@ type Config struct {
 	PalworldGameDataMaxBytes     int64
 	PalDefenderRESTBaseURL       string
 	PalDefenderRESTPort          int
+	PalDefenderReleaseAPIBaseURL string
+	PalDefenderDownloadMaxBytes  int64
 	SaveIndexerEnabled           bool
 	SaveIndexerURL               string
 	SaveIndexCacheDir            string
@@ -354,6 +358,8 @@ func Load() (Config, error) {
 		PalworldGameDataMaxBytes:     int64(envInt("PALPANEL_GAME_DATA_MAX_MB", 16)) * 1024 * 1024,
 		PalDefenderRESTBaseURL:       env("PALPANEL_PALDEFENDER_REST_BASE_URL", fmt.Sprintf("http://127.0.0.1:%d", palDefenderRESTPort)),
 		PalDefenderRESTPort:          palDefenderRESTPort,
+		PalDefenderReleaseAPIBaseURL: strings.TrimRight(strings.TrimSpace(env("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", DefaultPalDefenderReleaseAPIBaseURL)), "/"),
+		PalDefenderDownloadMaxBytes:  int64(envInt("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB", DefaultPalDefenderDownloadMaxMB)) * 1024 * 1024,
 		SaveIndexerEnabled:           envBool("PALPANEL_SAVE_INDEXER_ENABLED", false),
 		SaveIndexerURL:               env("PALPANEL_SAVE_INDEXER_URL", "http://127.0.0.1:8090"),
 		SaveIndexCacheDir:            saveIndexCacheDir,
@@ -415,6 +421,12 @@ func Load() (Config, error) {
 	}
 	if cfg.DownloadRetries < 1 || cfg.DownloadRetries > 5 {
 		return Config{}, fmt.Errorf("PALPANEL_DOWNLOAD_RETRIES must be between 1 and 5")
+	}
+	if err := validateHTTPSBaseURL("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", cfg.PalDefenderReleaseAPIBaseURL); err != nil {
+		return Config{}, err
+	}
+	if cfg.PalDefenderDownloadMaxBytes < 1*1024*1024 || cfg.PalDefenderDownloadMaxBytes > 1024*1024*1024 {
+		return Config{}, fmt.Errorf("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB must be between 1 and 1024")
 	}
 	if cfg.AITranslationTimeoutSeconds < 1 || cfg.AITranslationTimeoutSeconds > 600 {
 		return Config{}, fmt.Errorf("PALPANEL_AI_TRANSLATION_TIMEOUT_SECONDS must be between 1 and 600")

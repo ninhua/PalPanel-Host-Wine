@@ -25,6 +25,9 @@
 - 新增统一安全下载客户端：GitHub 下载依次尝试主代理、备用代理和原始地址，
   强制 IPv4/HTTP 1.1、有限重试、大小与 SHA-256 校验、归档结构检查、缓存和
   `.part` 原子落盘；Mod 的 GitHub Release 元数据与资产下载已迁入该客户端。
+- PalDefender Release API 基址和资产大小上限进入正式配置；Release 元数据、
+  DLL 和 ZIP 资产统一使用安全下载客户端，直链失败时回退 ZIP，安装继续使用
+  SHA-256 校验、暂存、备份和事务回滚，本地状态不依赖 GitHub API 可用性。
 
 ### Changed
 

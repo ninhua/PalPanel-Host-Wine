@@ -2,7 +2,6 @@ package paldefender
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -22,13 +21,12 @@ import (
 
 	"palpanel/internal/appconfig"
 	"palpanel/internal/db"
+	"palpanel/internal/downloadclient"
 	"palpanel/internal/id"
 	"palpanel/internal/jobs"
 )
 
 const (
-	releasesURL     = "https://api.github.com/repos/Ultimeit/PalDefender/releases"
-	latestURL       = "https://api.github.com/repos/Ultimeit/PalDefender/releases/latest"
 	kvVersion       = "paldefender_version"
 	kvRESTToken     = "paldefender_rest_token"
 	kvRuntimeMode   = "runtime_mode"
@@ -70,14 +68,18 @@ func PanelRESTPermissions() []string {
 }
 
 type Manager struct {
-	cfg         appconfig.Config
-	store       *db.Store
-	client      *http.Client
-	restClient  *http.Client
-	restBaseURL string
-	jobs        *jobs.Executor
-	ue4ss       *dependencyTracker
-	serverState ServerState
+	cfg       appconfig.Config
+	store     *db.Store
+	client    *http.Client // retained for UE4SS until P1-12 migrates that channel
+	downloads interface {
+		Download(context.Context, downloadclient.Request) (downloadclient.Result, error)
+	}
+	releaseAPIBase string
+	restClient     *http.Client
+	restBaseURL    string
+	jobs           *jobs.Executor
+	ue4ss          *dependencyTracker
+	serverState    ServerState
 }
 
 type Release struct {
@@ -122,12 +124,26 @@ func NewManager(cfg appconfig.Config, store *db.Store, executors ...*jobs.Execut
 	if len(executors) > 0 && executors[0] != nil {
 		executor = executors[0]
 	}
-	return Manager{cfg: cfg, store: store, client: &http.Client{Timeout: 60 * time.Second}, restClient: newRESTHTTPClient(), restBaseURL: cfg.EffectivePalDefenderRESTBaseURL(), jobs: executor, ue4ss: newDependencyTracker()}
+	releaseAPIBase := strings.TrimRight(strings.TrimSpace(cfg.PalDefenderReleaseAPIBaseURL), "/")
+	if releaseAPIBase == "" {
+		releaseAPIBase = appconfig.DefaultPalDefenderReleaseAPIBaseURL
+	}
+	return Manager{
+		cfg: cfg, store: store, client: &http.Client{Timeout: 60 * time.Second},
+		downloads: downloadclient.New(downloadclient.Config{
+			ProxyBases: cfg.GitHubProxyBases,
+			CacheDir:   cfg.DownloadCacheDir,
+			Timeout:    time.Duration(cfg.DownloadTimeoutSeconds) * time.Second,
+			Retries:    cfg.DownloadRetries,
+		}),
+		releaseAPIBase: releaseAPIBase,
+		restClient:     newRESTHTTPClient(), restBaseURL: cfg.EffectivePalDefenderRESTBaseURL(), jobs: executor, ue4ss: newDependencyTracker(),
+	}
 }
 
 func (m Manager) Releases(ctx context.Context) ([]Release, error) {
 	var releases []Release
-	if err := m.getJSON(ctx, releasesURL, &releases); err != nil {
+	if err := m.getJSON(ctx, m.releaseAPIBase, &releases); err != nil {
 		return nil, err
 	}
 	stable := releases[:0]
@@ -145,7 +161,7 @@ func (m Manager) Releases(ctx context.Context) ([]Release, error) {
 
 func (m Manager) Latest(ctx context.Context) (Release, error) {
 	var release Release
-	err := m.getJSON(ctx, latestURL, &release)
+	err := m.getJSON(ctx, m.releaseAPIBase+"/latest", &release)
 	return release, err
 }
 
@@ -443,18 +459,24 @@ func (m Manager) installRelease(ctx context.Context, release Release) error {
 	loaderAsset := findAsset(release.Assets, "d3d9.dll")
 	palDefenderAsset := findAsset(release.Assets, "PalDefender.dll")
 	var loaderPath, palDefenderPath string
+	var directErr error
 	if loaderAsset.BrowserDownloadURL != "" && palDefenderAsset.BrowserDownloadURL != "" {
 		loaderPath = filepath.Join(stage, "d3d9.dll")
 		if err := m.downloadAsset(ctx, loaderAsset, loaderPath); err != nil {
-			return err
+			directErr = fmt.Errorf("direct d3d9.dll download failed: %w", err)
+		} else {
+			palDefenderPath = filepath.Join(stage, "PalDefender.dll")
+			if err := m.downloadAsset(ctx, palDefenderAsset, palDefenderPath); err != nil {
+				directErr = fmt.Errorf("direct PalDefender.dll download failed: %w", err)
+			}
 		}
-		palDefenderPath = filepath.Join(stage, "PalDefender.dll")
-		if err := m.downloadAsset(ctx, palDefenderAsset, palDefenderPath); err != nil {
-			return err
-		}
-	} else {
+	}
+	if loaderPath == "" || palDefenderPath == "" || directErr != nil {
 		zipAsset := findAsset(release.Assets, "PalDefender.zip")
 		if zipAsset.BrowserDownloadURL == "" {
+			if directErr != nil {
+				return directErr
+			}
 			return fmt.Errorf("latest release must provide d3d9.dll and PalDefender.dll, or a PalDefender.zip fallback")
 		}
 		zipPath := filepath.Join(stage, "PalDefender.zip")
@@ -512,71 +534,53 @@ func (m Manager) downloadAsset(ctx context.Context, asset Asset, dst string) err
 	if err := m.cfg.ValidateManagedPath(dst, false); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
-	if err != nil {
-		return err
+	maxAssetBytes := m.cfg.PalDefenderDownloadMaxBytes
+	if maxAssetBytes <= 0 {
+		maxAssetBytes = appconfig.DefaultPalDefenderDownloadMaxMB << 20
 	}
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("download %s returned status %d", asset.Name, resp.StatusCode)
-	}
-	const maxAssetBytes int64 = 64 << 20
-	if resp.ContentLength > maxAssetBytes || asset.Size > maxAssetBytes {
+	if asset.Size > maxAssetBytes {
 		return fmt.Errorf("download %s exceeds the size limit", asset.Name)
 	}
-	var buf bytes.Buffer
-	written, err := io.Copy(&buf, io.LimitReader(resp.Body, maxAssetBytes+1))
+	digest, err := assetSHA256(asset)
 	if err != nil {
 		return err
 	}
-	if written > maxAssetBytes {
-		return fmt.Errorf("download %s exceeds the size limit", asset.Name)
+	var validate func(string) error
+	if strings.HasSuffix(strings.ToLower(asset.Name), ".zip") {
+		validate = downloadclient.ValidateZIP
 	}
-	if err := verifyDigest(asset, buf.Bytes()); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(dst), ".paldefender-download-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	complete := false
-	defer func() {
-		_ = temporary.Close()
-		if !complete {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if _, err := temporary.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, dst); err != nil {
-		return err
-	}
-	complete = true
-	return nil
+	_, err = m.downloads.Download(ctx, downloadclient.Request{
+		URL:         asset.BrowserDownloadURL,
+		Destination: dst,
+		SHA256:      digest,
+		MaxBytes:    maxAssetBytes,
+		CacheKey:    asset.BrowserDownloadURL + ":" + digest,
+		Validate:    validate,
+	})
+	return err
 }
 
-func verifyDigest(asset Asset, b []byte) error {
+func assetSHA256(asset Asset) (string, error) {
 	if asset.Digest == "" {
-		return fmt.Errorf("%s release asset has no SHA-256 digest", asset.Name)
+		return "", fmt.Errorf("%s release asset has no SHA-256 digest", asset.Name)
 	}
 	want, ok := strings.CutPrefix(asset.Digest, "sha256:")
 	if !ok {
-		return fmt.Errorf("%s release asset uses an unsupported digest", asset.Name)
+		return "", fmt.Errorf("%s release asset uses an unsupported digest", asset.Name)
+	}
+	if len(want) != 64 {
+		return "", fmt.Errorf("%s release asset has an invalid SHA-256 digest", asset.Name)
+	}
+	if _, err := hex.DecodeString(want); err != nil {
+		return "", fmt.Errorf("%s release asset has an invalid SHA-256 digest", asset.Name)
+	}
+	return strings.ToLower(want), nil
+}
+
+func verifyDigest(asset Asset, b []byte) error {
+	want, err := assetSHA256(asset)
+	if err != nil {
+		return err
 	}
 	sum := sha256.Sum256(b)
 	got := hex.EncodeToString(sum[:])
@@ -622,21 +626,29 @@ func (m Manager) latestBackup() (string, error) {
 	return dirs[len(dirs)-1], nil
 }
 
-func (m Manager) getJSON(ctx context.Context, url string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (m Manager) getJSON(ctx context.Context, rawURL string, out any) error {
+	if err := os.MkdirAll(m.cfg.ToolsDir, 0o755); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(m.cfg.ToolsDir, ".paldefender-release-*.json")
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := m.client.Do(req)
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	defer os.Remove(path)
+	if _, err := m.downloads.Download(ctx, downloadclient.Request{URL: rawURL, Destination: path, MaxBytes: 4 << 20}); err != nil {
+		return err
+	}
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	defer file.Close()
+	return json.NewDecoder(file).Decode(out)
 }
 
 func (m Manager) update(jobID, status string, progress int, message, errText string) {

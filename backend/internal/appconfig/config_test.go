@@ -40,6 +40,18 @@ func TestLoadRejectsUnsafeGitHubProxy(t *testing.T) {
 	}
 }
 
+func TestLoadConfiguresPalDefenderReleaseSource(t *testing.T) {
+	t.Setenv("PALPANEL_PALDEFENDER_RELEASE_API_BASE_URL", "https://releases.example/paldefender/")
+	t.Setenv("PALPANEL_PALDEFENDER_DOWNLOAD_MAX_MB", "96")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PalDefenderReleaseAPIBaseURL != "https://releases.example/paldefender" || cfg.PalDefenderDownloadMaxBytes != 96<<20 {
+		t.Fatalf("PalDefender release config = %q, %d", cfg.PalDefenderReleaseAPIBaseURL, cfg.PalDefenderDownloadMaxBytes)
+	}
+}
+
 func TestLoadAllowsExplicitDevNoAuth(t *testing.T) {
 	t.Setenv("PALPANEL_REQUIRE_AUTH", "false")
 	t.Setenv("STEAM_WEB_API_KEY", "steam-key")
