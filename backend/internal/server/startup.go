@@ -12,7 +12,17 @@ import (
 const (
 	RuntimeWineDocker      = "wine_docker"
 	RuntimeWindowsSteamCMD = "windows_steamcmd"
+	RuntimeHostWine        = "host_wine"
 )
+
+func IsRuntimeModeSupported(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case RuntimeWineDocker, RuntimeWindowsSteamCMD, RuntimeHostWine:
+		return true
+	default:
+		return false
+	}
+}
 
 type StartupConfig struct {
 	Port                        int    `json:"port"`

@@ -161,7 +161,7 @@ func (m Manager) RuntimeMode(ctx context.Context) (string, error) {
 	if !ok || strings.TrimSpace(mode) == "" {
 		return RecommendedRuntimeForOS(runtime.GOOS), nil
 	}
-	if mode != RuntimeWineDocker && mode != RuntimeWindowsSteamCMD {
+	if !IsRuntimeModeSupported(mode) {
 		return RecommendedRuntimeForOS(runtime.GOOS), nil
 	}
 	return mode, nil
@@ -169,7 +169,7 @@ func (m Manager) RuntimeMode(ctx context.Context) (string, error) {
 
 func (m Manager) SetRuntimeMode(ctx context.Context, mode string) error {
 	mode = strings.TrimSpace(mode)
-	if mode != RuntimeWineDocker && mode != RuntimeWindowsSteamCMD {
+	if !IsRuntimeModeSupported(mode) {
 		return fmt.Errorf("unsupported runtime mode: %s", mode)
 	}
 	return m.store.SetKV(ctx, kvRuntimeMode, mode)

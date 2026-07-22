@@ -41,6 +41,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 const runtimeLabels: Record<RuntimeMode, string> = {
   windows_steamcmd: 'Windows SteamCMD（推荐正式服）',
   wine_docker: 'Docker + Wine（兼容 Windows Mod）',
+  host_wine: 'Host Wine（Linux，无需 Docker）',
 };
 
 const dockerMirrorOptions: { value: DockerMirrorID; label: string }[] = [
@@ -1053,7 +1054,7 @@ const AdvancedSetupPanel: React.FC<{
               Runtime 运行方式
             </h4>
             <div className="grid grid-cols-1 gap-3">
-              {(['windows_steamcmd', 'wine_docker'] as RuntimeMode[]).map((mode) => (
+              {(['windows_steamcmd', 'host_wine', 'wine_docker'] as RuntimeMode[]).map((mode) => (
                 <button
                   type="button"
                   key={mode}
@@ -1068,7 +1069,9 @@ const AdvancedSetupPanel: React.FC<{
                   <p className="mt-1 text-[11px] font-medium opacity-75">
                     {mode === 'windows_steamcmd'
                       ? '使用本机 SteamCMD 管理 Windows 版服务端。'
-                      : '使用 Docker + Wine 运行 Windows 版服务端和 Mod。'}
+                      : mode === 'host_wine'
+                        ? '使用宿主便携 Wine 原生管理 Windows 版服务端，无需 Docker daemon。'
+                        : '使用 Docker + Wine 运行 Windows 版服务端和 Mod。'}
                   </p>
                 </button>
               ))}

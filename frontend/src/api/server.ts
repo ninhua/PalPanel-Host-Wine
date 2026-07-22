@@ -109,7 +109,10 @@ export const mapServerStatus = (raw: unknown): ServerStatus => {
     status,
     installed: Boolean(data.installed),
     pending_restart: Boolean(data.pending_restart),
-    runtime_mode: data.runtime_mode === 'windows_steamcmd' ? 'windows_steamcmd' : 'wine_docker',
+    runtime_mode:
+      data.runtime_mode === 'windows_steamcmd' || data.runtime_mode === 'host_wine'
+        ? data.runtime_mode
+        : 'wine_docker',
     setup_step: String(data.setup_step || stoppedStatus.setup_step),
     config_exists: Boolean(data.config_exists),
     container: {

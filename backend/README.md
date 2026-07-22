@@ -63,6 +63,7 @@ request timing and health-probe results into the bounded
 
 - `windows_steamcmd`: recommended for production Windows hosts. The backend downloads SteamCMD into `data/tools/steamcmd` when needed and installs the Windows dedicated server with `steamcmd +login anonymous +app_update 2394010 validate +quit`.
 - `wine_docker`: keeps the existing Docker + Wine flow for Windows edition server mods and containerized operation. Official Palworld docs warn against Docker Desktop for production save-data IO, so update operations create backups first. Version checks use the existing Wine runner image; build or install once before checking remote version in this mode.
+- `host_wine`: Linux Host Wine provider contract for running the Windows dedicated server without a Docker daemon. The mode is under Phase 1 development until process identity, lifecycle, SteamCMD isolation, save preflight, and metrics are implemented and validated.
 
 Official REST and RCON health checks distinguish authentication failures,
 disabled services, and Docker mapping mismatches. `PALPANEL_RCON_HOST` defaults

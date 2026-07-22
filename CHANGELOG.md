@@ -8,6 +8,8 @@
 
 - 导入 Host Wine 源码化需求、运行环境边界、实施映射、测试矩阵和许可规则。
 - 保留只读的 `palworld-panel-start-fixed-v1.0.36.sh` 行为基线。
+- 新增 `host_wine` Runtime 模式和正式 Provider 生命周期接口，作为后续 Linux
+  Host Wine 进程实现的稳定边界。
 
 ### Changed
 

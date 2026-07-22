@@ -40,3 +40,25 @@ P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试
 - 要求：移除 Mod/Workshop 页面针对 Steam 账号和登录状态的强制门禁；后端正式
   接受 `anonymous` 和空用户名；保留 PalPanel 自身认证、权限与高风险确认。
 - 程序行为：本提交仅补充实施契约，具体前后端实现归入 P1-06。
+
+## P1-01：Host Wine Runtime Provider 契约
+
+- 日期：2026-07-22
+- 新增 Runtime 模式：`host_wine`。
+- 新增 Provider 能力边界：安装、更新、校验、启动、保存、优雅关服、停止、
+  强制停止、重启、状态、健康、指标、日志、启动参数保存和运行状态恢复。
+- Setup 页面可以识别并展示 Host Wine 模式；Docker 模式和 Windows SteamCMD
+  模式继续保留。
+- 本提交只建立接口和模式契约；Linux `/proc` 身份验证与实际进程控制由后续
+  P1-02/P1-03 原子提交实现。
+
+### 验证
+
+- P0 完整 GitHub Actions CI：通过，Linux、Windows、vulnerability 三个 Job
+  全部成功（run `29906437187`）。
+- `npm run typecheck`：通过。
+- `npm run test -- src/pages/Setup.test.tsx`：通过，12/12。
+- `gofmt`：已应用于本提交修改和新增的 Go 文件。
+- 本机 Go 测试：未形成有效结果；工作盘无法在超时内完整展开便携 Go 标准库。
+  当前提交的 Go 编译与单元测试由推送后的 Linux/Windows CI 验证。
+- `git diff --check`：通过。

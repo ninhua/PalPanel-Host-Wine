@@ -74,7 +74,10 @@ const emptySudoCapability: SudoCapability = {
   needs_password: false,
 };
 
-const mapRuntimeMode = (value: unknown): RuntimeMode => (value === 'windows_steamcmd' ? 'windows_steamcmd' : 'wine_docker');
+const mapRuntimeMode = (value: unknown): RuntimeMode => {
+  if (value === 'windows_steamcmd' || value === 'host_wine') return value;
+  return 'wine_docker';
+};
 
 const mapServerImportResult = (raw: unknown): ServerImportResult => {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
