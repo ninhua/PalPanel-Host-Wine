@@ -216,6 +216,15 @@ python -m unittest discover -s astrbot_plugin_palpanel/tests
 
 接口定义在 [`docs/openapi.yaml`](docs/openapi.yaml)。`dev` 分支每次推送后会生成 Windows/Linux 开发包，正式版本以 [Releases](https://github.com/uitok/palworld-panel/releases) 为准。
 
+## Host Wine 改造
+
+本 Fork 正在以 PalPanel v1.2.1 的
+`b0b3806e6c49610f43d96af361412a348f6a653d` 为固定基线，逐步增加无需
+Docker daemon 的 Linux Host Wine Runtime。运行环境边界、实施顺序、测试矩阵、
+上游来源和 v1.0.36 启动脚本基线见 [`docs/host-wine/README.md`](docs/host-wine/README.md)。
+
+Phase 1 完成前，Host Wine 支持仍属于开发中功能，不应替代现有生产部署。
+
 ## 安全与限制
 
 - 管理员会话和 QQ 配种会话使用不同的 Cookie 与权限检查
