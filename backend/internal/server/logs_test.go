@@ -120,5 +120,9 @@ func newLogTestManager(t *testing.T, scriptBody string) (Manager, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewManager(cfg, store, docker.NewRunner(cfg)), func() { _ = store.Close() }
+	manager := NewManager(cfg, store, docker.NewRunner(cfg))
+	if err := manager.SetRuntimeMode(t.Context(), RuntimeWineDocker); err != nil {
+		t.Fatal(err)
+	}
+	return manager, func() { _ = store.Close() }
 }

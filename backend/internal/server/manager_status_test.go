@@ -44,6 +44,9 @@ func TestStatusReportsDockerErrorAsWarning(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(cfg, store, docker.NewRunner(cfg))
+	if err := manager.SetRuntimeMode(context.Background(), RuntimeWineDocker); err != nil {
+		t.Fatal(err)
+	}
 	status, err := manager.Status(context.Background())
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)

@@ -212,6 +212,9 @@ esac
 		t.Fatal(err)
 	}
 	m := NewManager(cfg, store, docker.NewRunner(cfg))
+	if err := m.SetRuntimeMode(t.Context(), RuntimeWineDocker); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, cfg.PalServerExePath(), "exe")
 	writeWorldFixture(t, m, "running-world")
 	return m, func() {

@@ -453,6 +453,9 @@ func testManager(t *testing.T) (Manager, func()) {
 	}
 	manager := NewManager(cfg, store)
 	manager.downloads = testHTTPDownloader{}
+	if err := store.SetKV(t.Context(), kvRuntimeMode, runtimeWindowsSteamCMD); err != nil {
+		t.Fatalf("SetKV runtime returned error: %v", err)
+	}
 	return manager, func() { _ = store.Close() }
 }
 

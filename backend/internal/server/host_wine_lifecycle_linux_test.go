@@ -17,10 +17,12 @@ func TestHostWineLifecycleUsesDedicatedSessionAndRecoversStatus(t *testing.T) {
 set -eu
 if [[ "${1:-}" == "cmd.exe" ]]; then
   batch="${4#Z:}"
-  batch="/${batch//\\//}"
+  batch="${batch//\\//}"
+  batch="/${batch#/}"
   destination="$(sed -n 's/^set "DEST=\(.*\)"$/\1/p' "$batch")"
-  destination="/${destination#Z:\\}"
+  destination="${destination#Z:}"
   destination="${destination//\\//}"
+  destination="/${destination#/}"
   printf 'new-24\r\n' > "$destination"
   exit 0
 fi

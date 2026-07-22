@@ -51,6 +51,9 @@ func TestImportServerDirectoryBindsSteamLibraryInPlace(t *testing.T) {
 
 	manager := NewManager(cfg, store, docker.NewRunner(cfg))
 	manager.goos = "windows"
+	if err := manager.SetRuntimeMode(context.Background(), RuntimeWindowsSteamCMD); err != nil {
+		t.Fatal(err)
+	}
 	result, err := manager.ImportServerDirectory(context.Background(), library)
 	if err != nil {
 		t.Fatalf("ImportServerDirectory returned error: %v", err)
