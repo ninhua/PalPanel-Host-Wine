@@ -171,6 +171,8 @@ jobs:
               -f target_commitish="$RELEASE_TAG" \
               --jq .body > "$notes"
           fi
+          printf '\n\n' >> "$notes"
+          sed "s/{{RELEASE_TAG}}/${RELEASE_TAG}/g" docs/release-assets.md >> "$notes"
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
