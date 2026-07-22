@@ -575,6 +575,7 @@ export type UE4SSDependencyState =
 
 export interface UE4SSDependencyStatus {
   state: UE4SSDependencyState;
+  channel: 'stable' | 'experimental-palworld' | 'custom';
   installed: boolean;
   version?: string;
   compatible: boolean;

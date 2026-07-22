@@ -27,6 +27,10 @@ const DefaultUE4SSVersion = "v3.0.1"
 const DefaultUE4SSDownloadURL = "https://github.com/UE4SS-RE/RE-UE4SS/releases/download/v3.0.1/UE4SS_v3.0.1.zip"
 const DefaultUE4SSArchiveSHA256 = "4b47d4bceddd2f561a4e395bfa00924ccfc945af576a2d0c613e6537846c57ec"
 const DefaultUE4SSDownloadMaxMB = 64
+const DefaultUE4SSReleaseChannel = "stable"
+const DefaultUE4SSExperimentalVersion = "experimental-palworld-20260719"
+const DefaultUE4SSExperimentalURL = "https://github.com/Okaetsu/RE-UE4SS/releases/download/experimental-palworld/UE4SS-Palworld.zip"
+const DefaultUE4SSExperimentalSHA256 = "768a45718fbb9e429ac5cc3ce4a139a1b7b468bff31b4a136ae483d725aca1ca"
 const DefaultAITranslationTimeoutSeconds = 90
 const DefaultMonitorRetentionDays = 7
 const DefaultDownloadTimeoutSeconds = 300
@@ -85,6 +89,10 @@ type Config struct {
 	UE4SSDownloadURL             string
 	UE4SSArchiveSHA256           string
 	UE4SSDownloadMaxBytes        int64
+	UE4SSReleaseChannel          string
+	UE4SSExperimentalVersion     string
+	UE4SSExperimentalURL         string
+	UE4SSExperimentalSHA256      string
 	GitHubProxyBases             []string
 	DownloadTimeoutSeconds       int
 	DownloadRetries              int
@@ -341,6 +349,10 @@ func Load() (Config, error) {
 		UE4SSDownloadURL:             strings.TrimSpace(env("PALPANEL_UE4SS_DOWNLOAD_URL", DefaultUE4SSDownloadURL)),
 		UE4SSArchiveSHA256:           strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_ARCHIVE_SHA256", DefaultUE4SSArchiveSHA256))),
 		UE4SSDownloadMaxBytes:        int64(envInt("PALPANEL_UE4SS_DOWNLOAD_MAX_MB", DefaultUE4SSDownloadMaxMB)) * 1024 * 1024,
+		UE4SSReleaseChannel:          strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_RELEASE_CHANNEL", DefaultUE4SSReleaseChannel))),
+		UE4SSExperimentalVersion:     strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_VERSION", DefaultUE4SSExperimentalVersion)),
+		UE4SSExperimentalURL:         strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_URL", DefaultUE4SSExperimentalURL)),
+		UE4SSExperimentalSHA256:      strings.ToLower(strings.TrimSpace(env("PALPANEL_UE4SS_EXPERIMENTAL_SHA256", DefaultUE4SSExperimentalSHA256))),
 		GitHubProxyBases:             envList("PALPANEL_GITHUB_PROXY_BASES", DefaultGitHubProxyBases),
 		DownloadTimeoutSeconds:       envInt("PALPANEL_DOWNLOAD_TIMEOUT_SECONDS", DefaultDownloadTimeoutSeconds),
 		DownloadRetries:              envInt("PALPANEL_DOWNLOAD_RETRIES", DefaultDownloadRetries),
@@ -406,6 +418,20 @@ func Load() (Config, error) {
 	}
 	if cfg.UE4SSDownloadMaxBytes < 1*1024*1024 || cfg.UE4SSDownloadMaxBytes > 1024*1024*1024 {
 		return Config{}, fmt.Errorf("PALPANEL_UE4SS_DOWNLOAD_MAX_MB must be between 1 and 1024")
+	}
+	switch cfg.UE4SSReleaseChannel {
+	case "stable", "experimental-palworld", "custom":
+	default:
+		return Config{}, fmt.Errorf("PALPANEL_UE4SS_RELEASE_CHANNEL must be stable, experimental-palworld, or custom")
+	}
+	if err := validateHTTPSBaseURL("PALPANEL_UE4SS_EXPERIMENTAL_URL", cfg.UE4SSExperimentalURL); err != nil {
+		return Config{}, err
+	}
+	if cfg.UE4SSExperimentalVersion == "" || len(cfg.UE4SSExperimentalSHA256) != 64 {
+		return Config{}, fmt.Errorf("UE4SS experimental version and 64-character SHA-256 are required")
+	}
+	if _, err := hex.DecodeString(cfg.UE4SSExperimentalSHA256); err != nil {
+		return Config{}, fmt.Errorf("PALPANEL_UE4SS_EXPERIMENTAL_SHA256 must be hexadecimal")
 	}
 	if len(cfg.GitHubProxyBases) != len(DefaultGitHubProxyBases) {
 		return Config{}, fmt.Errorf("PALPANEL_GITHUB_PROXY_BASES must contain the primary and fallback proxy URLs")

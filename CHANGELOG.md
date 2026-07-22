@@ -28,6 +28,9 @@
 - PalDefender Release API 基址和资产大小上限进入正式配置；Release 元数据、
   DLL 和 ZIP 资产统一使用安全下载客户端，直链失败时回退 ZIP，安装继续使用
   SHA-256 校验、暂存、备份和事务回滚，本地状态不依赖 GitHub API 可用性。
+- UE4SS 正式支持 `stable`、`experimental-palworld` 和 `custom` 渠道；Host Wine
+  环境默认选择固定 SHA-256 的 Palworld experimental 构建，下载使用统一客户端，
+  安装保留备份回滚，安全页直接显示真实渠道、版本、运行路径和日志加载证据。
 
 ### Changed
 

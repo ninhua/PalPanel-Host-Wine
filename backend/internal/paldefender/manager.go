@@ -70,7 +70,6 @@ func PanelRESTPermissions() []string {
 type Manager struct {
 	cfg       appconfig.Config
 	store     *db.Store
-	client    *http.Client // retained for UE4SS until P1-12 migrates that channel
 	downloads interface {
 		Download(context.Context, downloadclient.Request) (downloadclient.Result, error)
 	}
@@ -129,7 +128,7 @@ func NewManager(cfg appconfig.Config, store *db.Store, executors ...*jobs.Execut
 		releaseAPIBase = appconfig.DefaultPalDefenderReleaseAPIBaseURL
 	}
 	return Manager{
-		cfg: cfg, store: store, client: &http.Client{Timeout: 60 * time.Second},
+		cfg: cfg, store: store,
 		downloads: downloadclient.New(downloadclient.Config{
 			ProxyBases: cfg.GitHubProxyBases,
 			CacheDir:   cfg.DownloadCacheDir,

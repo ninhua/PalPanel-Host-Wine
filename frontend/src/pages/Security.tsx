@@ -128,6 +128,8 @@ export const Security: React.FC = () => {
                 value={status.ue4ss.version ? `${status.ue4ss.state} (${status.ue4ss.version})` : status.ue4ss.state}
                 ok={status.ue4ss.compatible}
               />
+              <InfoRow label="UE4SS 渠道" value={status.ue4ss.channel} ok={status.ue4ss.compatible} />
+              <InfoRow label="UE4SS 运行路径" value={status.ue4ss.path || '未知'} ok={Boolean(status.ue4ss.path)} />
               <InfoRow label="UE4SS 加载" value={status.ue4ss.load_verified ? '启动日志已确认' : '尚未确认'} ok={status.ue4ss.load_verified} />
               <InfoRow label="首次启动" value={status.needs_first_start ? '需要启动生成配置' : '已就绪'} ok={!status.needs_first_start} />
               {status.ue4ss.message && (

@@ -52,6 +52,17 @@ func TestLoadConfiguresPalDefenderReleaseSource(t *testing.T) {
 	}
 }
 
+func TestLoadSelectsExperimentalPalworldUE4SSChannel(t *testing.T) {
+	t.Setenv("PALPANEL_UE4SS_RELEASE_CHANNEL", "experimental-palworld")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UE4SSReleaseChannel != "experimental-palworld" || cfg.UE4SSExperimentalURL != DefaultUE4SSExperimentalURL || cfg.UE4SSExperimentalSHA256 != DefaultUE4SSExperimentalSHA256 {
+		t.Fatalf("experimental UE4SS config = channel %q, URL %q, SHA %q", cfg.UE4SSReleaseChannel, cfg.UE4SSExperimentalURL, cfg.UE4SSExperimentalSHA256)
+	}
+}
+
 func TestLoadAllowsExplicitDevNoAuth(t *testing.T) {
 	t.Setenv("PALPANEL_REQUIRE_AUTH", "false")
 	t.Setenv("STEAM_WEB_API_KEY", "steam-key")
