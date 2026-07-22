@@ -10,6 +10,8 @@
 - 保留只读的 `palworld-panel-start-fixed-v1.0.36.sh` 行为基线。
 - 新增 `host_wine` Runtime 模式和正式 Provider 生命周期接口，作为后续 Linux
   Host Wine 进程实现的稳定边界。
+- 新增 Linux Host Wine 严格进程身份校验基础：PID、进程组、`/proc` 启动时钟、
+  Shipping 可执行文件参数和独立 `WINEPREFIX`。
 
 ### Changed
 

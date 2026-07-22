@@ -435,6 +435,10 @@ func (c Config) PalServerExePath() string {
 	return filepath.Join(c.ServerDirectory(), "PalServer.exe")
 }
 
+func (c Config) PalServerShippingPath() string {
+	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping.exe")
+}
+
 func (c Config) DefaultPalWorldSettingsPath() string {
 	return filepath.Join(c.ServerDirectory(), "DefaultPalWorldSettings.ini")
 }

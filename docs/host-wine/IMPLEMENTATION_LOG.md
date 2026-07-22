@@ -62,3 +62,13 @@ P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试
 - 本机 Go 测试：未形成有效结果；工作盘无法在超时内完整展开便携 Go 标准库。
   当前提交的 Go 编译与单元测试由推送后的 Linux/Windows CI 验证。
 - `git diff --check`：通过。
+
+## P1-02：Host Wine 进程身份（进行中）
+
+- 新增可持久化的 Host Wine 进程身份记录：PID、PGID、Linux `/proc` 启动时钟、
+  Shipping 路径和 `WINEPREFIX`。
+- 读取 `/proc/<pid>/stat` 时按最后一个右括号切分，兼容进程名中包含空格或括号，
+  避免字段错位。
+- 重验命令行中的完整 Shipping 路径和环境中的完整 `WINEPREFIX`，不接受子串匹配。
+- 新增 `PalServerShippingPath()` 正式路径入口及 Linux 单元测试；不以 PID 单值
+  判断服务仍在运行。
