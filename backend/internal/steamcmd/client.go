@@ -312,7 +312,7 @@ func (c *Client) DownloadWorkshopTo(ctx context.Context, appID, itemID, destinat
 
 	source := filepath.Join(stageRoot, "steamapps", "workshop", "content", appID, itemID)
 	if err := c.validateDownloadedTree(source); err != nil {
-		detail := sanitizeOutput(string(out), login.AccountName)
+		detail := sanitizeOutput(string(out), accountName)
 		if detail != "" {
 			return fmt.Errorf("SteamCMD did not produce a complete Workshop item: %w; command output: %s", err, detail)
 		}
