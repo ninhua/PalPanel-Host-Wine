@@ -5,6 +5,14 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -15,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
           submodules: recursive
       - uses: actions/setup-dotnet@v4
@@ -33,29 +42,29 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Validate release tag
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
-          [[ "$(git rev-parse HEAD)" == "$(git rev-list -n 1 "$GITHUB_REF_NAME")" ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          [[ "$(git rev-parse HEAD)" == "$(git rev-list -n 1 "$RELEASE_TAG")" ]]
           scripts/scan-secrets.sh
           git diff --check
       - name: Build release assets from tag
-        run: scripts/package.sh --version "$GITHUB_REF_NAME" --targets linux-amd64 --clean
+        run: scripts/package.sh --version "$RELEASE_TAG" --targets linux-amd64 --clean
       - name: Extract package for SBOM
         run: |
           mkdir -p dist/sbom-root
-          tar -xzf "dist/packages/palpanel_${GITHUB_REF_NAME}_linux_amd64.tar.gz" -C dist/sbom-root
+          tar -xzf "dist/packages/palpanel_${RELEASE_TAG}_linux_amd64.tar.gz" -C dist/sbom-root
       - uses: anchore/sbom-action@v0
         with:
           path: dist/sbom-root
           format: spdx-json
-          output-file: dist/packages/palpanel_${{ github.ref_name }}_linux_amd64.spdx.json
+          output-file: dist/packages/palpanel_${{ env.RELEASE_TAG }}_linux_amd64.spdx.json
           upload-artifact: false
       - name: Verify Linux assets
         run: |
           scripts/verify-release-contents.sh \
-            "dist/packages/palpanel_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
-            "dist/packages/palpanel-sav-cli_${GITHUB_REF_NAME}_source.tar.gz" \
-            "dist/packages/palpanel_${GITHUB_REF_NAME}_source.tar.gz"
-          scripts/smoke-linux.sh "dist/packages/palpanel_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+            "dist/packages/palpanel_${RELEASE_TAG}_linux_amd64.tar.gz" \
+            "dist/packages/palpanel-sav-cli_${RELEASE_TAG}_source.tar.gz" \
+            "dist/packages/palpanel_${RELEASE_TAG}_source.tar.gz"
+          scripts/smoke-linux.sh "dist/packages/palpanel_${RELEASE_TAG}_linux_amd64.tar.gz"
       - name: Upload Linux release assets
         uses: actions/upload-artifact@v4
         with:
@@ -63,10 +72,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           path: |
-            dist/packages/palpanel_${{ github.ref_name }}_linux_amd64.tar.gz
-            dist/packages/palpanel-sav-cli_${{ github.ref_name }}_source.tar.gz
-            dist/packages/palpanel_${{ github.ref_name }}_source.tar.gz
-            dist/packages/palpanel_${{ github.ref_name }}_linux_amd64.spdx.json
+            dist/packages/palpanel_${{ env.RELEASE_TAG }}_linux_amd64.tar.gz
+            dist/packages/palpanel-sav-cli_${{ env.RELEASE_TAG }}_source.tar.gz
+            dist/packages/palpanel_${{ env.RELEASE_TAG }}_source.tar.gz
+            dist/packages/palpanel_${{ env.RELEASE_TAG }}_linux_amd64.spdx.json
             dist/packages/THIRD_PARTY_LICENSES.txt
 
   build-windows:
@@ -74,6 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
           submodules: recursive
       - uses: actions/setup-dotnet@v4
@@ -97,29 +107,29 @@ jobs:
       - name: Validate release tag
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$') { throw "invalid release tag" }
-          if ((git rev-parse HEAD).Trim() -ne (git rev-list -n 1 $env:GITHUB_REF_NAME).Trim()) { throw "tag does not point at HEAD" }
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$') { throw "invalid release tag" }
+          if ((git rev-parse HEAD).Trim() -ne (git rev-list -n 1 $env:RELEASE_TAG).Trim()) { throw "tag does not point at HEAD" }
       - name: Build Windows release package
         shell: pwsh
         run: |
           $gcc = Join-Path $env:RUNNER_TEMP "msys64\mingw64\bin\gcc.exe"
           if (-not (Test-Path $gcc)) { throw "MinGW gcc not found: $gcc" }
-          ./scripts/package.ps1 -Version $env:GITHUB_REF_NAME -Clean -MingwGcc $gcc
+          ./scripts/package.ps1 -Version $env:RELEASE_TAG -Clean -MingwGcc $gcc
       - name: Verify Windows package and Launcher
         shell: pwsh
         run: |
-          $archive = "dist\packages\palpanel_$($env:GITHUB_REF_NAME)_windows_amd64.zip"
-          $package = "dist\packages\palpanel_$($env:GITHUB_REF_NAME)_windows_amd64"
+          $archive = "dist\packages\palpanel_$($env:RELEASE_TAG)_windows_amd64.zip"
+          $package = "dist\packages\palpanel_$($env:RELEASE_TAG)_windows_amd64"
           $objdump = Join-Path $env:RUNNER_TEMP "msys64\mingw64\bin\objdump.exe"
           ./scripts/verify-windows-package.ps1 -Archive $archive -ObjdumpPath $objdump
-          ./scripts/smoke-windows.ps1 -PackageDir $package -Version $env:GITHUB_REF_NAME
+          ./scripts/smoke-windows.ps1 -PackageDir $package -Version $env:RELEASE_TAG
       - name: Upload Windows release asset
         uses: actions/upload-artifact@v4
         with:
           name: release-windows
           if-no-files-found: error
           retention-days: 1
-          path: dist/packages/palpanel_${{ github.ref_name }}_windows_amd64.zip
+          path: dist/packages/palpanel_${{ env.RELEASE_TAG }}_windows_amd64.zip
 
   publish:
     needs: [build-linux, build-windows]
@@ -129,6 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           submodules: recursive
       - uses: actions/download-artifact@v4
         with:
@@ -142,37 +153,37 @@ jobs:
         run: |
           cd dist/release
           sha256sum \
-            "palpanel_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
-            "palpanel_${GITHUB_REF_NAME}_windows_amd64.zip" \
-            "palpanel_${GITHUB_REF_NAME}_source.tar.gz" \
-            "palpanel-sav-cli_${GITHUB_REF_NAME}_source.tar.gz" \
-            "palpanel_${GITHUB_REF_NAME}_linux_amd64.spdx.json" \
+            "palpanel_${RELEASE_TAG}_linux_amd64.tar.gz" \
+            "palpanel_${RELEASE_TAG}_windows_amd64.zip" \
+            "palpanel_${RELEASE_TAG}_source.tar.gz" \
+            "palpanel-sav-cli_${RELEASE_TAG}_source.tar.gz" \
+            "palpanel_${RELEASE_TAG}_linux_amd64.spdx.json" \
             THIRD_PARTY_LICENSES.txt > SHA256SUMS
       - name: Prepare release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="docs/release-${GITHUB_REF_NAME}.md"
+          notes="docs/release-${RELEASE_TAG}.md"
           if [[ ! -f "$notes" ]]; then
             mkdir -p docs
             gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="$GITHUB_REF_NAME" \
-              -f target_commitish="$GITHUB_SHA" \
+              -f tag_name="$RELEASE_TAG" \
+              -f target_commitish="$RELEASE_TAG" \
               --jq .body > "$notes"
           fi
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: PalPanel ${{ github.ref_name }}
-          body_path: docs/release-${{ github.ref_name }}.md
+          name: PalPanel ${{ env.RELEASE_TAG }}
+          body_path: docs/release-${{ env.RELEASE_TAG }}.md
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            dist/release/palpanel_${{ github.ref_name }}_linux_amd64.tar.gz
-            dist/release/palpanel_${{ github.ref_name }}_windows_amd64.zip
-            dist/release/palpanel_${{ github.ref_name }}_source.tar.gz
-            dist/release/palpanel-sav-cli_${{ github.ref_name }}_source.tar.gz
-            dist/release/palpanel_${{ github.ref_name }}_linux_amd64.spdx.json
+            dist/release/palpanel_${{ env.RELEASE_TAG }}_linux_amd64.tar.gz
+            dist/release/palpanel_${{ env.RELEASE_TAG }}_windows_amd64.zip
+            dist/release/palpanel_${{ env.RELEASE_TAG }}_source.tar.gz
+            dist/release/palpanel-sav-cli_${{ env.RELEASE_TAG }}_source.tar.gz
+            dist/release/palpanel_${{ env.RELEASE_TAG }}_linux_amd64.spdx.json
             dist/release/THIRD_PARTY_LICENSES.txt
             dist/release/SHA256SUMS
