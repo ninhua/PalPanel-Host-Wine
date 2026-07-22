@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { ServerStoreProvider } from '../store/ServerStoreProvider';
@@ -188,7 +188,7 @@ describe('Mods Workshop store', () => {
     expect(screen.queryByRole('dialog', { name: '登录 Steam 以使用 Workshop' })).not.toBeInTheDocument();
   });
 
-  it('does not load Workshop until SteamCMD login is explicitly verified', async () => {
+  it('loads Workshop anonymously and offers Steam authorization only on demand', async () => {
     mocks.authApi.status.mockResolvedValue({ initialized: true, authenticated: true, user: { name: 'admin', role: 'admin', permissions: ['read', 'mods:write', 'security:write'] } });
     mocks.authApi.me.mockResolvedValue({ name: 'admin', role: 'admin', permissions: ['read', 'mods:write', 'security:write'] });
     mocks.modsApi.workshopAuthStatus.mockResolvedValue({
@@ -198,18 +198,20 @@ describe('Mods Workshop store', () => {
 
     renderMods();
 
+    await waitFor(() => expect(mocks.modsApi.searchWorkshop).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('匿名模式：无需配置或登录 Steam 账号')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '可选：授权 Steam 账号' }));
     const dialog = await screen.findByRole('dialog', { name: '登录 Steam 以使用 Workshop' });
-    expect(mocks.modsApi.searchWorkshop).not.toHaveBeenCalled();
     expect(dialog.querySelector('input[type="password"]')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Steam 账户名'), { target: { value: 'steam_account' } });
     fireEvent.click(screen.getByRole('button', { name: '打开 SteamCMD 登录窗口' }));
     await waitFor(() => expect(mocks.modsApi.startWorkshopAuth).toHaveBeenCalledWith('steam_account'));
-    expect(mocks.modsApi.searchWorkshop).not.toHaveBeenCalled();
+    expect(mocks.modsApi.searchWorkshop).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '我已完成，验证登录' }));
     await waitFor(() => expect(mocks.modsApi.verifyWorkshopAuth).toHaveBeenCalledWith('steam_account'));
-    await waitFor(() => expect(mocks.modsApi.searchWorkshop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/使用 Steam 账号缓存/)).toBeInTheDocument());
     expect(screen.queryByRole('dialog', { name: '登录 Steam 以使用 Workshop' })).not.toBeInTheDocument();
   });
 
@@ -223,7 +225,7 @@ describe('Mods Workshop store', () => {
     expect(screen.queryByText(/本机管理员/)).not.toBeInTheDocument();
   });
 
-  it('requires a local security administrator to start or verify Steam login', async () => {
+  it('keeps anonymous Workshop available without granting Steam login controls', async () => {
     mocks.modsApi.workshopAuthStatus.mockResolvedValue({
       supported: true, steamcmd_installed: true, credentials_secure: true, login_in_progress: false,
       logged_in: false, verification_required: true,
@@ -231,12 +233,12 @@ describe('Mods Workshop store', () => {
 
     renderMods();
 
-    expect(await screen.findByText('Steam 登录需由具备安全管理权限的本机管理员在面板主机上完成。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开 SteamCMD 登录窗口' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '我已完成，验证登录' })).toBeDisabled();
+    await waitFor(() => expect(mocks.modsApi.searchWorkshop).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('匿名模式：无需配置或登录 Steam 账号')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '可选：授权 Steam 账号' })).not.toBeInTheDocument();
   });
 
-  it('keeps GitHub and HTTPS imports available while blocking Workshop imports behind Steam login', async () => {
+  it('keeps GitHub, HTTPS, and Workshop imports available without Steam login', async () => {
     mocks.modsApi.workshopAuthStatus.mockResolvedValue({
       supported: true, steamcmd_installed: true, credentials_secure: true, login_in_progress: false,
       logged_in: false, verification_required: true,
@@ -247,7 +249,6 @@ describe('Mods Workshop store', () => {
     });
 
     renderMods();
-    fireEvent.click(await screen.findByRole('button', { name: '关闭 Steam 登录' }));
     fireEvent.click(screen.getByRole('button', { name: '导入 Mod' }));
     fireEvent.change(screen.getByLabelText('导入来源'), { target: { value: 'https://github.com/example/mod/releases/latest' } });
     fireEvent.click(screen.getByRole('button', { name: '检查' }));
@@ -256,17 +257,17 @@ describe('Mods Workshop store', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新选择' }));
     fireEvent.change(screen.getByLabelText('导入来源'), { target: { value: '123456789' } });
     fireEvent.click(screen.getByRole('button', { name: '检查' }));
-    expect(await screen.findByRole('dialog', { name: '登录 Steam 以使用 Workshop' })).toBeInTheDocument();
-    expect(mocks.modsApi.inspectImport).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.modsApi.inspectImport).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: '登录 Steam 以使用 Workshop' })).not.toBeInTheDocument();
   });
 
-  it('returns to the Steam gate when a verified Workshop session expires', async () => {
+  it('falls back to anonymous mode instead of opening a Steam gate when an account cache expires', async () => {
     mocks.modsApi.searchWorkshop.mockRejectedValue(new ApiError('Steam cache expired', 401, 'steam_login_required'));
 
     renderMods();
 
-    const dialog = await screen.findByRole('dialog', { name: '登录 Steam 以使用 Workshop' });
-    expect(within(dialog).getByText('Steam cache expired')).toBeInTheDocument();
+    expect(await screen.findByText(/已切回匿名下载：Steam cache expired/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '登录 Steam 以使用 Workshop' })).not.toBeInTheDocument();
     expect(mocks.modsApi.searchWorkshop).toHaveBeenCalledTimes(1);
   });
 

@@ -80,6 +80,7 @@ export const Mods: React.FC = () => {
   const [workshopAuthLoading, setWorkshopAuthLoading] = useState(true);
   const [workshopAuthError, setWorkshopAuthError] = useState<string | null>(null);
   const [workshopLoginOpen, setWorkshopLoginOpen] = useState(false);
+  const [useSteamAccount, setUseSteamAccount] = useState(false);
   const [selectedWorkshop, setSelectedWorkshop] = useState<WorkshopItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [translationLoading, setTranslationLoading] = useState(false);
@@ -111,12 +112,6 @@ export const Mods: React.FC = () => {
     try {
       const status = await modsApi.workshopAuthStatus();
       setWorkshopAuth(status);
-      if (!status.logged_in) {
-        setStoreItems([]);
-        setStoreNextCursor(undefined);
-        setStoreTotal(0);
-        setWorkshopLoginOpen(true);
-      }
       return status;
     } catch (error) {
       setWorkshopAuthError(getErrorMessage(error));
@@ -141,11 +136,8 @@ export const Mods: React.FC = () => {
           message: errorMessage,
         });
     setWorkshopAuthError(errorMessage);
-    setStoreItems([]);
-    setStoreNextCursor(undefined);
-    setStoreTotal(0);
-    setSelectedWorkshop(null);
-    setWorkshopLoginOpen(true);
+    setUseSteamAccount(false);
+    setMessage(`Steam 账号缓存不可用，已切回匿名下载：${errorMessage}`);
     return true;
   }, []);
 
@@ -185,12 +177,7 @@ export const Mods: React.FC = () => {
   const loadStore = useCallback(async (
     reset = true,
     overrides: { sort?: string } = {},
-    authenticated = workshopAuth?.logged_in === true,
   ) => {
-    if (!authenticated) {
-      setWorkshopLoginOpen(true);
-      return;
-    }
     setStoreLoading(true);
     setStoreError(null);
     try {
@@ -219,15 +206,14 @@ export const Mods: React.FC = () => {
     } finally {
       setStoreLoading(false);
     }
-  }, [handleWorkshopAuthFailure, storeNextCursor, storeQuery, storeSort, tagText, workshopAuth?.logged_in]);
+  }, [handleWorkshopAuthFailure, storeNextCursor, storeQuery, storeSort, tagText]);
 
   useEffect(() => {
     if (initialLoadRef.current) return;
     initialLoadRef.current = true;
     void loadInstalled();
-    void loadWorkshopAuthStatus().then((status) => {
-      if (status?.logged_in) void loadStore(true, {}, true);
-    });
+    void loadWorkshopAuthStatus();
+    void loadStore();
   }, [loadInstalled, loadStore, loadWorkshopAuthStatus]);
 
   useEffect(() => {
@@ -284,16 +270,12 @@ export const Mods: React.FC = () => {
   };
 
   const installWorkshop = async (itemID: string, enable: boolean) => {
-    if (!workshopAuth?.logged_in) {
-      setWorkshopLoginOpen(true);
-      return;
-    }
     if (!itemID.trim()) {
       setMessage('请输入 Steam Workshop Item ID');
       return;
     }
     try {
-      const job = await modsApi.downloadWorkshop(itemID.trim(), enable);
+      const job = await modsApi.downloadWorkshop(itemID.trim(), enable, useSteamAccount && workshopAuth?.logged_in === true);
       const done = await trackJob(job);
       if (done.status === 'success' && !storeError) {
         await loadStore(true);
@@ -319,7 +301,7 @@ export const Mods: React.FC = () => {
       await modsApi.delete(mod.id);
       setMessage('Mod 已删除，重启后生效');
       await loadInstalled();
-      if (workshopAuth?.logged_in && !storeError) {
+      if (!storeError) {
         await loadStore(true);
       }
     } catch (error) {
@@ -328,10 +310,6 @@ export const Mods: React.FC = () => {
   };
 
   const openWorkshopDetail = async (item: WorkshopItem) => {
-    if (!workshopAuth?.logged_in) {
-      setWorkshopLoginOpen(true);
-      return;
-    }
     setSelectedWorkshop(item);
     setTranslationError(null);
     setDetailLoading(true);
@@ -366,7 +344,8 @@ export const Mods: React.FC = () => {
     setWorkshopAuth(status);
     setWorkshopAuthError(null);
     setWorkshopLoginOpen(false);
-    await loadStore(true, {}, true);
+    setUseSteamAccount(true);
+    await loadStore(true);
   };
 
   const headers = [
@@ -418,27 +397,31 @@ export const Mods: React.FC = () => {
       {message && <div className="rounded-lg border border-sky-100 bg-sky-50 px-5 py-3 text-xs font-semibold text-sky-700">{message}</div>}
       {activeJob && <JobProgress job={activeJob} />}
 
-      {activeTab === 'store' && workshopAuthLoading && (
+      {activeTab === 'store' && workshopAuthLoading && storeItems.length === 0 && (
         <div className="py-12 text-center text-xs font-semibold text-slate-400">
           <RefreshCw className="mr-2 inline animate-spin text-sky-500" size={14} />
-          正在验证 Steam 登录缓存...
+          正在加载 Workshop...
         </div>
       )}
 
-      {activeTab === 'store' && !workshopAuthLoading && !workshopAuth?.logged_in && !workshopLoginOpen && (
-        <WorkshopAuthGate
-          status={workshopAuth}
-          error={workshopAuthError}
-          canAuthenticate={canAuthenticateSteam}
-          onLogin={() => setWorkshopLoginOpen(true)}
-          onRetry={() => void loadWorkshopAuthStatus().then((status) => {
-            if (status?.logged_in) void loadStore(true, {}, true);
-          })}
-        />
-      )}
-
-      {activeTab === 'store' && !workshopAuthLoading && workshopAuth?.logged_in && (
+      {activeTab === 'store' && (
         <section className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-semibold text-sky-800">
+            <span>{useSteamAccount && workshopAuth?.logged_in ? `使用 Steam 账号缓存：${workshopAuth.account_name || '已授权账号'}` : '匿名模式：无需配置或登录 Steam 账号'}</span>
+            <div className="flex items-center gap-3">
+              {workshopAuth?.logged_in && (
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" checked={useSteamAccount} onChange={(event) => setUseSteamAccount(event.target.checked)} />
+                  使用账号下载
+                </label>
+              )}
+              {canAuthenticateSteam && (
+                <button type="button" onClick={() => setWorkshopLoginOpen(true)} className="rounded-md border border-sky-200 bg-white px-3 py-1.5 text-sky-700 hover:bg-sky-100">
+                  {workshopAuth?.logged_in ? '更新账号授权' : '可选：授权 Steam 账号'}
+                </button>
+              )}
+            </div>
+          </div>
           <div className="rounded-lg border border-slate-100 bg-white p-4">
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
               <div className="relative">
@@ -739,7 +722,7 @@ export const Mods: React.FC = () => {
 	  {importOpen && (
 		<ImportDialog
 		  onClose={() => setImportOpen(false)}
-		  workshopAuthenticated={workshopAuth?.logged_in === true}
+		  workshopAuthenticated
 		  onWorkshopAuthRequired={() => {
 			setImportOpen(false);
 			setWorkshopLoginOpen(true);
@@ -747,7 +730,7 @@ export const Mods: React.FC = () => {
 		  onImport={async (job) => {
 			setImportOpen(false);
 			const done = await trackJob(job);
-			if (done.status === 'success' && workshopAuth?.logged_in && !storeError) await loadStore(true);
+			if (done.status === 'success' && !storeError) await loadStore(true);
 		  }}
 		/>
 	  )}
@@ -764,7 +747,7 @@ export const Mods: React.FC = () => {
           onInstallEnabled={() => installWorkshop(selectedWorkshop.id, true)}
         />
       )}
-      {workshopLoginOpen && !workshopAuth?.logged_in && (
+      {workshopLoginOpen && (
         <WorkshopLoginDialog
           status={workshopAuth}
           initialError={workshopAuthError}
@@ -841,55 +824,6 @@ const InstalledRuntimeComponents: React.FC<{
         ))}
       </div>
     </div>
-  );
-};
-
-const WorkshopAuthGate: React.FC<{
-  status: SteamWorkshopAuthStatus | null;
-  error: string | null;
-  canAuthenticate: boolean;
-  onLogin: () => void;
-  onRetry: () => void;
-}> = ({ status, error, canAuthenticate, onLogin, onRetry }) => {
-  const unsupported = status?.supported === false;
-  const steamCMDMissing = status?.supported === true && !status.steamcmd_installed;
-  const title = unsupported
-    ? '当前平台不支持 SteamCMD 登录'
-    : steamCMDMissing
-      ? '需要先安装 SteamCMD'
-      : error && !status
-        ? '无法检查 Steam 登录'
-        : '登录 Steam 后浏览 Workshop';
-  return (
-    <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-slate-100 bg-white px-5 py-12 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-900 text-white">
-        <LogIn size={21} />
-      </div>
-      <h2 className="mt-4 text-base font-bold text-slate-900">{title}</h2>
-      <p className="mt-2 max-w-xl text-xs font-semibold leading-5 text-slate-500">
-        Workshop 搜索、详情和下载只会在验证本机 SteamCMD 登录缓存后加载。本地 Mod、GitHub、HTTPS ZIP、UE4SS 和 PalDefender 不受此门禁影响。
-      </p>
-      {(error || status?.message) && (
-        <div role="alert" className="mt-4 max-w-xl rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-left text-xs font-semibold leading-5 text-amber-800">
-          {error || status?.message}
-        </div>
-      )}
-      {!canAuthenticate && (
-        <p className="mt-4 text-xs font-semibold text-slate-500">Steam 登录需由具备安全管理权限的本机管理员完成。</p>
-      )}
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        {!unsupported && !steamCMDMissing && status && canAuthenticate && (
-          <button type="button" onClick={onLogin} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800">
-            <LogIn size={14} />
-            登录 Steam
-          </button>
-        )}
-        <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
-          <RefreshCw size={14} />
-          重新检查
-        </button>
-      </div>
-    </section>
   );
 };
 

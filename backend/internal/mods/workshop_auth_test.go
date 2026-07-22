@@ -112,7 +112,7 @@ func TestVerifyWorkshopLoginReusesPersistedAccount(t *testing.T) {
 	}
 }
 
-func TestWorkshopImportRejectsMissingLoginBeforeSubmittingJobAndReleasesClaim(t *testing.T) {
+func TestWorkshopImportSubmitsAnonymousJobWithoutRequiringLogin(t *testing.T) {
 	manager, store := newImportTestManager(t)
 	useNativeWorkshopAuth(t, store)
 	if err := store.SetKV(t.Context(), workshopSteamAccountKey, "persisted_user"); err != nil {
@@ -127,17 +127,15 @@ func TestWorkshopImportRejectsMissingLoginBeforeSubmittingJobAndReleasesClaim(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.Import(t.Context(), inspection.ID, inspection.SelectedCandidateID)
-	var failure ImportFailure
-	if !errors.As(err, &failure) || failure.Code != "steam_login_required" {
-		t.Fatalf("Import error = %v", err)
+	job, err := manager.Import(t.Context(), inspection.ID, inspection.SelectedCandidateID)
+	if err != nil || job.ID == "" {
+		t.Fatalf("Import job = %#v, error = %v", job, err)
 	}
-	record := manager.imports.records[inspection.ID]
-	if record == nil || record.claimed {
-		t.Fatalf("inspection claim was not released: %#v", record)
+	if len(fake.requireCalls) != 0 {
+		t.Fatalf("anonymous import invoked Steam login: %#v", fake.requireCalls)
 	}
 	jobs, listErr := store.ListJobs(t.Context(), 10)
-	if listErr != nil || len(jobs) != 0 {
+	if listErr != nil || len(jobs) != 1 {
 		t.Fatalf("jobs = %#v, error = %v", jobs, listErr)
 	}
 }

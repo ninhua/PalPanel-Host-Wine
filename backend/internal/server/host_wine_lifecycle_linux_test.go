@@ -16,7 +16,7 @@ func TestHostWineLifecycleUsesDedicatedSessionAndRecoversStatus(t *testing.T) {
 	script := `#!/bin/bash
 set -eu
 server_dir="$(dirname "$1")"
-shipping="$server_dir/Pal/Binaries/Win64/PalServer-Win64-Shipping.exe"
+shipping="$server_dir/Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"
 exec -a "$shipping" sleep 120
 `
 	if err := os.WriteFile(fakeWine, []byte(script), 0o755); err != nil {

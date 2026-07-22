@@ -28,21 +28,24 @@ func (m Manager) workshopRuntimeMode(ctx context.Context) (string, error) {
 		return "", err
 	}
 	mode = strings.TrimSpace(mode)
-	if !configured || (mode != server.RuntimeWindowsSteamCMD && mode != server.RuntimeWineDocker) {
+	if !configured || (mode != server.RuntimeWindowsSteamCMD && mode != server.RuntimeHostWine && mode != server.RuntimeWineDocker) {
 		return server.RecommendedRuntimeForOS(runtime.GOOS), nil
 	}
 	return mode, nil
 }
 
-func (m Manager) downloadWorkshopTo(ctx context.Context, jobID, itemID, destination string) error {
+func (m Manager) downloadWorkshopTo(ctx context.Context, jobID, itemID, destination string, useSteamAccount bool) error {
 	mode, err := m.workshopRuntimeMode(ctx)
 	if err != nil {
 		return fmt.Errorf("read runtime mode: %w", err)
 	}
-	if mode == server.RuntimeWindowsSteamCMD {
-		accountName, _, err := m.store.GetKV(ctx, workshopSteamAccountKey)
-		if err != nil {
-			return fmt.Errorf("read Steam Workshop account: %w", err)
+	if mode == server.RuntimeWindowsSteamCMD || mode == server.RuntimeHostWine {
+		accountName := ""
+		if useSteamAccount {
+			accountName, _, err = m.store.GetKV(ctx, workshopSteamAccountKey)
+			if err != nil {
+				return fmt.Errorf("read Steam Workshop account: %w", err)
+			}
 		}
 		m.update(jobID, "running", 10, "preparing native SteamCMD", "")
 		if err := m.native.Ensure(ctx); err != nil {

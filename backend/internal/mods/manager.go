@@ -97,7 +97,7 @@ func (m Manager) WorkshopDetail(ctx context.Context, itemID string) (WorkshopIte
 	return items[0], nil
 }
 
-func (m Manager) DownloadWorkshop(ctx context.Context, itemID string, enable bool) (db.Job, error) {
+func (m Manager) DownloadWorkshop(ctx context.Context, itemID string, enable, useSteamAccount bool) (db.Job, error) {
 	itemID = strings.TrimSpace(itemID)
 	if itemID == "" {
 		return db.Job{}, fmt.Errorf("workshop item id is required")
@@ -105,8 +105,10 @@ func (m Manager) DownloadWorkshop(ctx context.Context, itemID string, enable boo
 	if !workshopIDPattern.MatchString(itemID) {
 		return db.Job{}, fmt.Errorf("workshop item id must be numeric")
 	}
-	if _, err := m.RequireWorkshopLogin(ctx); err != nil {
-		return db.Job{}, err
+	if useSteamAccount {
+		if _, err := m.RequireWorkshopLogin(ctx); err != nil {
+			return db.Job{}, err
+		}
 	}
 	record, err := m.imports.newRecord(itemID)
 	if err != nil {
@@ -118,7 +120,7 @@ func (m Manager) DownloadWorkshop(ctx context.Context, itemID string, enable boo
 		if item, err := m.workshop.Detail(jobCtx, itemID); err == nil {
 			meta = item
 		}
-		m.runWorkshopImport(jobCtx, jobID, itemID, enable, meta, record.directory)
+		m.runWorkshopImport(jobCtx, jobID, itemID, enable, useSteamAccount, meta, record.directory)
 	})
 	if err != nil {
 		_ = m.removeManagedDirectory(record.directory)

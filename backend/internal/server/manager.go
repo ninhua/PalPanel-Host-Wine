@@ -340,7 +340,7 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 			return false
 		}
 	}
-	if mode == RuntimeWindowsSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		m.update(jobID, "running", 25, "preparing SteamCMD", "")
 		if m.installOrUpdateFunc == nil {
 			if err := m.ensureSteamCMD(ctx); err != nil {
@@ -367,7 +367,7 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 			return false
 		}
 	}
-	if mode == RuntimeWindowsSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		if err := m.validateWindowsServerInstall(); err != nil {
 			m.update(jobID, "failed", 70, action+" verification failed", err.Error()+retainedBackupMessage(backup))
 			return false
@@ -882,7 +882,7 @@ func (m Manager) installOrUpdateRuntime(ctx context.Context, mode string) error 
 	if m.installOrUpdateFunc != nil {
 		return m.installOrUpdateFunc(ctx, mode)
 	}
-	if mode == RuntimeWindowsSteamCMD {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		return m.installOrUpdateWindows(ctx)
 	}
 	return m.runner.InstallOrUpdate(ctx)

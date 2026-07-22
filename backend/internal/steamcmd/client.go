@@ -59,7 +59,7 @@ func New(cfg appconfig.Config) *Client {
 		httpClient:          &http.Client{Timeout: defaultDownloadTimeout},
 		goos:                runtime.GOOS,
 		timeout:             defaultCommandTimeout,
-		runCommand:          runCommand,
+		runCommand:          steamCMDCommandRunner(cfg, runtime.GOOS),
 		credentialHardener:  hardenCredentialTree,
 		interactiveLauncher: launchInteractiveSteamCMD,
 		now:                 time.Now,
@@ -78,8 +78,20 @@ func (c *Client) Ensure(ctx context.Context) error {
 	if err := c.validateInstalled(); err == nil {
 		return nil
 	}
-	if c.goos != "windows" {
-		return fmt.Errorf("native SteamCMD requires a Windows host")
+	if c.goos != "windows" && c.goos != "linux" {
+		return fmt.Errorf("Windows SteamCMD requires a Windows host or Linux Host Wine")
+	}
+	if c.goos == "linux" {
+		if _, err := exec.LookPath(c.cfg.WineBinary); err != nil {
+			return fmt.Errorf("SteamCMD Wine binary %q not found: %w", c.cfg.WineBinary, err)
+		}
+		prefix := steamCMDWinePrefix(c.cfg)
+		if err := c.validateManaged(prefix); err != nil {
+			return fmt.Errorf("validate SteamCMD Wine prefix: %w", err)
+		}
+		if err := os.MkdirAll(prefix, 0o700); err != nil {
+			return fmt.Errorf("create SteamCMD Wine prefix: %w", err)
+		}
 	}
 	release, err := c.acquire(ctx)
 	if err != nil {
@@ -242,9 +254,14 @@ func (c *Client) DownloadWorkshopTo(ctx context.Context, appID, itemID, destinat
 	if err := c.Ensure(ctx); err != nil {
 		return err
 	}
-	login, err := c.RequireLogin(ctx, accountName)
-	if err != nil {
-		return err
+	accountName = strings.TrimSpace(accountName)
+	loginName := "anonymous"
+	if accountName != "" {
+		login, err := c.RequireLogin(ctx, accountName)
+		if err != nil {
+			return err
+		}
+		loginName = login.AccountName
 	}
 
 	release, err := c.acquire(ctx)
@@ -270,26 +287,26 @@ func (c *Client) DownloadWorkshopTo(ctx context.Context, appID, itemID, destinat
 		return err
 	}
 
-	loginArgs := []string{"+@NoPromptForPassword", "1", "+login", login.AccountName}
+	loginArgs := []string{"+@NoPromptForPassword", "1", "+login", loginName}
 	args := []string{"+@sSteamCmdForcePlatformType", "windows", "+force_install_dir", stageRoot}
 	args = append(args, loginArgs...)
 	args = append(args, "+workshop_download_item", appID, itemID, "validate", "+quit")
 	out, runErr := c.runCommand(commandCtx, c.cfg.SteamCMDBinaryPath(), c.cfg.SteamCMDDir, args...)
 	if runErr != nil {
-		if loginFailureOutput(out) {
+		if accountName != "" && loginFailureOutput(out) {
 			c.invalidateLogin()
 			return ErrLoginRequired
 		}
-		return c.commandError(commandCtx, runErr, out, login.AccountName)
+		return c.commandError(commandCtx, runErr, out, accountName)
 	}
 	if err := commandCtx.Err(); err != nil {
 		return fmt.Errorf("SteamCMD Workshop download interrupted: %w", err)
 	}
-	if loginFailureOutput(out) {
+	if accountName != "" && loginFailureOutput(out) {
 		c.invalidateLogin()
 		return ErrLoginRequired
 	}
-	if err := workshopCommandFailure(out, itemID, login.AccountName); err != nil {
+	if err := workshopCommandFailure(out, itemID, accountName); err != nil {
 		return err
 	}
 
@@ -631,9 +648,33 @@ func ValidatePEExecutable(path string) error {
 	return nil
 }
 
+func steamCMDCommandRunner(cfg appconfig.Config, goos string) commandRunner {
+	if goos != "linux" {
+		return runCommand
+	}
+	return func(ctx context.Context, binary, directory string, args ...string) ([]byte, error) {
+		wineArgs := append([]string{binary}, args...)
+		cmd := exec.CommandContext(ctx, cfg.WineBinary, wineArgs...)
+		cmd.Dir = directory
+		cmd.Env = append(os.Environ(), "WINEPREFIX="+steamCMDWinePrefix(cfg), "WINEDEBUG=-all")
+		return runBufferedCommand(cmd)
+	}
+}
+
+func steamCMDWinePrefix(cfg appconfig.Config) string {
+	if strings.TrimSpace(cfg.SteamCMDWinePrefixDir) != "" {
+		return cfg.SteamCMDWinePrefixDir
+	}
+	return filepath.Join(cfg.DataDir, "wineprefix-steamcmd")
+}
+
 func runCommand(ctx context.Context, binary, directory string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = directory
+	return runBufferedCommand(cmd)
+}
+
+func runBufferedCommand(cmd *exec.Cmd) ([]byte, error) {
 	cmd.WaitDelay = 5 * time.Second
 	buffer := newTailBuffer(maxCommandOutputBytes)
 	cmd.Stdout = buffer

@@ -47,6 +47,7 @@ type Config struct {
 	DataDir                      string
 	ServerDir                    string
 	WinePrefixDir                string
+	SteamCMDWinePrefixDir        string
 	ToolsDir                     string
 	SteamCMDDir                  string
 	UE4SSDir                     string
@@ -188,6 +189,7 @@ func Load() (Config, error) {
 	dbDefault := ""
 	saveIndexDefault := ""
 	winePrefixDefault := ""
+	steamCMDWinePrefixDefault := ""
 	if layout.Structured {
 		mutableBase = layout.RuntimeRoot
 		dataDefault = filepath.Join(layout.RuntimeRoot, "data")
@@ -201,6 +203,7 @@ func Load() (Config, error) {
 		dbDefault = filepath.Join(dataDefault, "database", "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDefault, "save-index")
 		winePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix")
+		steamCMDWinePrefixDefault = filepath.Join(layout.RuntimeRoot, "wineprefix-steamcmd")
 	}
 	dataDir, err := configuredPath("PALPANEL_DATA_DIR", dataDefault, mutableBase)
 	if err != nil {
@@ -217,12 +220,17 @@ func Load() (Config, error) {
 		dbDefault = filepath.Join(dataDir, "palpanel.db")
 		saveIndexDefault = filepath.Join(dataDir, "save-index")
 		winePrefixDefault = filepath.Join(dataDir, "wineprefix")
+		steamCMDWinePrefixDefault = filepath.Join(dataDir, "wineprefix-steamcmd")
 	}
 	serverDir, err := configuredPath("PALPANEL_SERVER_DIR", serverDefault, mutableBase)
 	if err != nil {
 		return Config{}, err
 	}
 	winePrefixDir, err := configuredPath("PALPANEL_WINE_PREFIX_DIR", winePrefixDefault, mutableBase)
+	if err != nil {
+		return Config{}, err
+	}
+	steamCMDWinePrefixDir, err := configuredPath("PALPANEL_STEAMCMD_WINE_PREFIX_DIR", steamCMDWinePrefixDefault, mutableBase)
 	if err != nil {
 		return Config{}, err
 	}
@@ -282,6 +290,7 @@ func Load() (Config, error) {
 		DataDir:                      dataDir,
 		ServerDir:                    serverDir,
 		WinePrefixDir:                winePrefixDir,
+		SteamCMDWinePrefixDir:        steamCMDWinePrefixDir,
 		ToolsDir:                     toolsDir,
 		SteamCMDDir:                  steamCMDDir,
 		UE4SSDir:                     ue4ssDir,
@@ -408,7 +417,7 @@ func (c Config) EnsureDirs() error {
 			return err
 		}
 	}
-	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
+	dirs := []string{c.DataDir, c.ServerDirectory(), c.WinePrefixDir, c.SteamCMDWinePrefixDir, c.ToolsDir, c.SteamCMDDir, c.UE4SSDir, c.UploadsDir, c.BackupsDir, c.LogsDir, c.SaveIndexCacheDir, c.SaveSourcesDir}
 	for _, dir := range dirs {
 		if strings.TrimSpace(dir) == "" {
 			continue
@@ -438,7 +447,7 @@ func (c Config) PalServerExePath() string {
 }
 
 func (c Config) PalServerShippingPath() string {
-	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping.exe")
+	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe")
 }
 
 func (c Config) DefaultPalWorldSettingsPath() string {

@@ -95,3 +95,17 @@ P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试
 - 统计前先严格重验持久化的 Shipping 进程身份；扫描范围限定为该 PGID，独立
   SteamCMD Prefix、其他 Wine 会话和面板进程均不计入。
 - 新增 `/proc` 解析测试和 Monitor Provider 映射测试。
+
+## P1-05/P1-06：独立 Windows SteamCMD 与匿名 Workshop
+
+- Linux Host Wine 通过 `wine64 steamcmd.exe` 执行 Windows SteamCMD，使用独立
+  `PALPANEL_STEAMCMD_WINE_PREFIX_DIR`，不与 PalServer Prefix 混用。
+- `host_wine` 安装和更新路径已改用正式 SteamCMD Client，不再构建 Docker 镜像。
+- Workshop 下载账号为空时明确生成 `+login anonymous`；只有请求明确携带
+  `use_steam_account=true` 时，后端才读取并验证可选账号缓存。
+- 删除 Workshop 搜索、详情、翻译、来源检查、导入和默认下载的登录前置校验。
+- 前端匿名模式可直接加载商店、详情和下载；Steam 账号授权入口保留为可选高级
+  功能，账号缓存失败会切回匿名模式而非打开登录门禁。
+- 密码和 Steam Guard 仍只允许输入 SteamCMD 原生窗口，API、数据库和日志均不
+  接收或持久化这些字段。
+- 前端类型检查通过；Mods API/Page 定向测试 24/24 通过。

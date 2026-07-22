@@ -20,7 +20,6 @@ import (
 	"palpanel/internal/db"
 	"palpanel/internal/id"
 	"palpanel/internal/jobs"
-	"palpanel/internal/steamcmd"
 )
 
 const (
@@ -239,25 +238,10 @@ func (m Manager) Import(ctx context.Context, inspectionID, candidateID string) (
 	if err != nil {
 		return db.Job{}, err
 	}
-	if candidate.workshopID != "" {
-		if _, err := m.RequireWorkshopLogin(ctx); err != nil {
-			m.imports.release(record)
-			switch {
-			case errors.Is(err, steamcmd.ErrLoginRequired):
-				return db.Job{}, ImportFailure{Code: "steam_login_required", Err: steamcmd.ErrLoginRequired}
-			case errors.Is(err, steamcmd.ErrInteractiveLogin):
-				return db.Job{}, ImportFailure{Code: "steam_login_unsupported", Err: steamcmd.ErrInteractiveLogin}
-			case errors.Is(err, steamcmd.ErrInvalidAccountName):
-				return db.Job{}, ImportFailure{Code: "invalid_steam_account", Err: errors.New("saved Steam account name is invalid")}
-			default:
-				return db.Job{}, ImportFailure{Code: "steam_login_verify_failed", Err: errors.New("Steam login verification failed")}
-			}
-		}
-	}
 	job, err := m.jobs.Submit(ctx, jobs.ClassLifecycle, "mod_import", "queued mod import", func(jobCtx context.Context, jobID string) {
 		defer m.imports.complete(record)
 		if candidate.workshopID != "" {
-			m.runWorkshopImport(jobCtx, jobID, candidate.workshopID, false, candidate.workshopMeta, record.directory)
+			m.runWorkshopImport(jobCtx, jobID, candidate.workshopID, false, false, candidate.workshopMeta, record.directory)
 			return
 		}
 		m.update(jobID, "running", 45, "installing validated mod", "")
@@ -527,7 +511,7 @@ func (m Manager) installPrepared(ctx context.Context, sourceRoot, source, worksh
 	return mod, nil
 }
 
-func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, enableNew bool, meta WorkshopItem, directory string) {
+func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, enableNew, useSteamAccount bool, meta WorkshopItem, directory string) {
 	downloadRoot := filepath.Join(directory, "workshop")
 	if err := m.cfg.ValidateManagedPath(downloadRoot, false); err != nil {
 		m.update(jobID, "failed", 20, "Workshop staging directory is unsafe", err.Error())
@@ -541,7 +525,7 @@ func (m Manager) runWorkshopImport(ctx context.Context, jobID, itemID string, en
 		m.update(jobID, "failed", 20, "Workshop staging directory is unsafe", err.Error())
 		return
 	}
-	if err := m.downloadWorkshopTo(ctx, jobID, itemID, downloadRoot); err != nil {
+	if err := m.downloadWorkshopTo(ctx, jobID, itemID, downloadRoot, useSteamAccount); err != nil {
 		m.update(jobID, "failed", 50, "Workshop download failed", err.Error())
 		return
 	}
