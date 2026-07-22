@@ -41,3 +41,12 @@ func TestNULIdentityFieldsRequireExactPaths(t *testing.T) {
 		t.Fatal("expected WINEPREFIX match")
 	}
 }
+
+func TestProcStatExitedRecognizesZombie(t *testing.T) {
+	if !procStatExited([]byte("12 (Pal Server) Z 1 2 3")) {
+		t.Fatal("expected zombie process to be treated as exited")
+	}
+	if procStatExited([]byte("12 (Pal Server) S 1 2 3")) {
+		t.Fatal("running process must not be treated as exited")
+	}
+}

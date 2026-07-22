@@ -21,6 +21,9 @@ func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineP
 	if err != nil {
 		return hostWineProcessRecord{}, fmt.Errorf("read PalServer process stat: %w", err)
 	}
+	if procStatExited(stat) {
+		return hostWineProcessRecord{}, fmt.Errorf("PalServer process exited: %w", os.ErrNotExist)
+	}
 	startTicks, err := parseProcStartTime(stat)
 	if err != nil {
 		return hostWineProcessRecord{}, err
@@ -38,6 +41,9 @@ func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineP
 		return hostWineProcessRecord{}, fmt.Errorf("resolve PalServer Shipping path: %w", err)
 	}
 	if !nulListContainsPath(cmdline, shippingPath) {
+		if currentStat, statErr := os.ReadFile(filepath.Join(procDir, "stat")); os.IsNotExist(statErr) || (statErr == nil && procStatExited(currentStat)) {
+			return hostWineProcessRecord{}, fmt.Errorf("PalServer process exited during identity verification: %w", os.ErrNotExist)
+		}
 		return hostWineProcessRecord{}, fmt.Errorf("PID %d command line does not contain expected PalServer Shipping path", pid)
 	}
 	winePrefix, err = filepath.Abs(winePrefix)
@@ -52,6 +58,15 @@ func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineP
 		return hostWineProcessRecord{}, fmt.Errorf("PID %d WINEPREFIX does not match the PalServer prefix", pid)
 	}
 	return hostWineProcessRecord{PID: pid, ProcessGroupID: pgid, StartTimeTicks: startTicks, ShippingPath: shippingPath, WinePrefix: winePrefix}, nil
+}
+
+func procStatExited(stat []byte) bool {
+	closeParen := bytes.LastIndexByte(stat, ')')
+	if closeParen < 0 || closeParen+2 >= len(stat) {
+		return false
+	}
+	fields := strings.Fields(string(stat[closeParen+2:]))
+	return len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X" || fields[0] == "x")
 }
 
 func verifyHostWineProcess(record hostWineProcessRecord) (bool, error) {
