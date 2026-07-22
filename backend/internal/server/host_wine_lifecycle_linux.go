@@ -176,3 +176,21 @@ func (m Manager) hostWineStatus(ctx context.Context) (docker.ContainerStatus, er
 	}
 	return docker.ContainerStatus{Exists: true, Status: "running"}, nil
 }
+
+func (m Manager) HostWineMetrics(ctx context.Context) (RuntimeMetrics, error) {
+	record, ok, err := m.loadHostWineProcess(ctx)
+	if err != nil {
+		return RuntimeMetrics{}, err
+	}
+	if !ok {
+		return RuntimeMetrics{}, fmt.Errorf("Host Wine process identity is unavailable")
+	}
+	running, err := verifyHostWineProcess(record)
+	if err != nil || !running {
+		if err != nil {
+			return RuntimeMetrics{}, err
+		}
+		return RuntimeMetrics{}, fmt.Errorf("Host Wine PalServer process is not running")
+	}
+	return sampleHostWineProcessGroup(ctx, record.ProcessGroupID)
+}

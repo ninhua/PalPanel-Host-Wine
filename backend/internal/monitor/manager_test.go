@@ -28,6 +28,26 @@ func (f fakeStatusServer) Status(context.Context) (server.Status, error) {
 	return f.status, f.err
 }
 
+type fakeHostWineStatusServer struct {
+	fakeStatusServer
+	metrics server.RuntimeMetrics
+	err     error
+}
+
+func (f fakeHostWineStatusServer) HostWineMetrics(context.Context) (server.RuntimeMetrics, error) {
+	return f.metrics, f.err
+}
+
+func TestFillHostWineStatsUsesProviderSessionMetrics(t *testing.T) {
+	source := fakeHostWineStatusServer{metrics: server.RuntimeMetrics{CPUPercent: 37.5, MemoryBytes: 123456}}
+	manager := Manager{server: source}
+	var sample db.MonitorSample
+	manager.fillHostWineStats(t.Context(), &sample)
+	if !sample.CPUAvailable || !sample.MemoryAvailable || sample.CPUPercent != 37.5 || sample.MemoryUsageBytes != 123456 {
+		t.Fatalf("Host Wine sample = %#v", sample)
+	}
+}
+
 func TestPruneRemovesExpiredSamples(t *testing.T) {
 	store, err := db.Open(filepath.Join(t.TempDir(), "monitor.db"))
 	if err != nil {

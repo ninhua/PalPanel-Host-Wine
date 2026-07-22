@@ -20,3 +20,7 @@ func (m Manager) stopHostWine(context.Context) error {
 func (m Manager) hostWineStatus(context.Context) (docker.ContainerStatus, error) {
 	return docker.ContainerStatus{Status: "error"}, fmt.Errorf("host_wine runtime requires Linux host")
 }
+
+func (m Manager) HostWineMetrics(context.Context) (RuntimeMetrics, error) {
+	return RuntimeMetrics{}, fmt.Errorf("host_wine runtime requires Linux host")
+}

@@ -84,3 +84,14 @@ P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试
 - 继续使用 PalPanel 正式轮转日志；新增 Linux 生命周期测试夹具，覆盖启动、
   状态恢复、身份持久化和停止。
 - 新增 `PALPANEL_WINE_BIN`，默认 `wine64`；Host Wine 前置检查不再要求 Docker。
+- CI 首次发现停服退出竞态：`SIGTERM` 后 zombie 的空命令行被误判为身份变化；
+  已改为显式识别 Linux zombie/退出态，活进程仍执行全部身份重验。
+
+## P1-04：PalServer 会话资源统计
+
+- Monitor 对 `host_wine` 使用 Provider 指标，不再落入 Windows `tasklist` 分支。
+- CPU 通过两次 `/proc/stat` 与会话进程 CPU tick 差值计算；内存汇总同一 PGID
+  所有进程的 RSS。
+- 统计前先严格重验持久化的 Shipping 进程身份；扫描范围限定为该 PGID，独立
+  SteamCMD Prefix、其他 Wine 会话和面板进程均不计入。
+- 新增 `/proc` 解析测试和 Monitor Provider 映射测试。
