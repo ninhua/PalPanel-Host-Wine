@@ -84,11 +84,25 @@ func parseProcStartTime(stat []byte) (uint64, error) {
 
 func nulListContainsPath(raw []byte, expected string) bool {
 	for _, value := range bytes.Split(raw, []byte{0}) {
-		if valuePathEquals(string(value), expected) {
+		if valuePathEquals(string(value), expected) || winePathEquals(string(value), expected) {
 			return true
 		}
 	}
 	return false
+}
+
+func winePathEquals(value, expected string) bool {
+	value = strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	if len(value) < 3 || value[1] != ':' || value[2] != '/' {
+		return false
+	}
+	// Wine's default Z: drive maps to the Unix root. Compare the complete
+	// normalized argument; never accept a basename or substring match.
+	if !strings.EqualFold(value[:2], "z:") {
+		return false
+	}
+	resolved, err := filepath.Abs("/" + strings.TrimLeft(value[3:], "/"))
+	return err == nil && filepath.Clean(resolved) == filepath.Clean(expected)
 }
 
 func nulEnvironmentPathEquals(raw []byte, key, expected string) bool {

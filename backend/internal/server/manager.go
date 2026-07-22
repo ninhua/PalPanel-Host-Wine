@@ -224,6 +224,16 @@ func (m Manager) Prerequisites(ctx context.Context) ([]Prerequisite, error) {
 			Prerequisite{ID: "docker", Label: "Docker CLI", OK: cliOK, Required: true, Message: cliMessage},
 			Prerequisite{ID: "docker_daemon", Label: "Docker daemon", OK: dockerCapability.DaemonReachable, Required: true, Message: daemonMessage},
 		)
+	} else if mode == RuntimeHostWine {
+		winePath, wineErr := exec.LookPath(m.cfg.WineBinary)
+		if winePath == "" {
+			winePath = m.cfg.WineBinary
+		}
+		checks = append(checks,
+			Prerequisite{ID: "linux", Label: "Linux host", OK: runtime.GOOS == "linux", Required: true, Message: runtime.GOOS},
+			Prerequisite{ID: "wine", Label: "Wine 64-bit", OK: wineErr == nil, Required: true, Message: winePath},
+			Prerequisite{ID: "wineprefix", Label: "PalServer Wine prefix", OK: strings.TrimSpace(m.cfg.WinePrefixDir) != "", Required: true, Message: m.cfg.WinePrefixDir},
+		)
 	} else {
 		steamCMDErr := validatePEExecutable(m.cfg.SteamCMDBinaryPath())
 		checks = append(checks,
@@ -477,6 +487,8 @@ func (m Manager) startUnlocked(ctx context.Context) error {
 	}
 	if mode == RuntimeWindowsSteamCMD {
 		err = m.startWindows(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeHostWine {
+		err = m.startHostWine(ctx, startup.Args(m.cfg))
 	} else {
 		err = m.runner.StartWithArgs(ctx, startup.Args(m.cfg))
 	}
@@ -518,6 +530,9 @@ func (m Manager) stopUnlocked(ctx context.Context) error {
 	if mode == RuntimeWindowsSteamCMD {
 		return m.stopWindows(ctx)
 	}
+	if mode == RuntimeHostWine {
+		return m.stopHostWine(ctx)
+	}
 	return m.runner.Stop(ctx)
 }
 
@@ -541,6 +556,11 @@ func (m Manager) restartUnlocked(ctx context.Context) error {
 			return fmt.Errorf("stop before restart: %w", err)
 		}
 		err = m.startWindows(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeHostWine {
+		if err := m.stopHostWine(ctx); err != nil {
+			return fmt.Errorf("stop before restart: %w", err)
+		}
+		err = m.startHostWine(ctx, startup.Args(m.cfg))
 	} else {
 		err = m.runner.RestartWithArgs(ctx, startup.Args(m.cfg))
 	}
@@ -649,6 +669,8 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 			statusErr = err
 			container = docker.ContainerStatus{Exists: false, Status: "error"}
 		}
+	} else if mode == RuntimeHostWine {
+		container, statusErr = m.hostWineStatus(ctx)
 	} else {
 		container, statusErr = m.windowsStatus(ctx)
 	}

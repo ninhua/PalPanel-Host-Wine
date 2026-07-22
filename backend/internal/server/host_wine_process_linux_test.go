@@ -34,6 +34,9 @@ func TestNULIdentityFieldsRequireExactPaths(t *testing.T) {
 	if nulListContainsPath([]byte("/opt/pal/PalServer-Win64-Shipping.exe.old\x00"), "/opt/pal/PalServer-Win64-Shipping.exe") {
 		t.Fatal("unexpected partial Shipping path match")
 	}
+	if !nulListContainsPath([]byte("Z:\\opt\\pal\\PalServer-Win64-Shipping.exe\x00"), "/opt/pal/PalServer-Win64-Shipping.exe") {
+		t.Fatal("expected exact Wine Z: Shipping path match")
+	}
 	if !nulEnvironmentPathEquals([]byte("HOME=/srv\x00WINEPREFIX=/srv/pal/wine\x00"), "WINEPREFIX", "/srv/pal/wine") {
 		t.Fatal("expected WINEPREFIX match")
 	}

@@ -59,6 +59,7 @@ type Config struct {
 	FrontendDist                 string
 	MaxUploadBytes               int64
 	DockerBinary                 string
+	WineBinary                   string
 	DockerImage                  string
 	DockerContainer              string
 	DockerRunnerBaseImage        string
@@ -293,6 +294,7 @@ func Load() (Config, error) {
 		FrontendDist:                 frontendDist,
 		MaxUploadBytes:               int64(envInt("PALPANEL_MAX_UPLOAD_MB", 256)) * 1024 * 1024,
 		DockerBinary:                 env("PALPANEL_DOCKER_BIN", "docker"),
+		WineBinary:                   env("PALPANEL_WINE_BIN", "wine64"),
 		DockerImage:                  env("PALPANEL_DOCKER_IMAGE", "palworld-wine-runner:local"),
 		DockerContainer:              env("PALPANEL_DOCKER_CONTAINER", "palworld-wine-server"),
 		DockerRunnerBaseImage:        env("PALPANEL_DOCKER_RUNNER_BASE_IMAGE", DefaultDockerRunnerBaseImage),

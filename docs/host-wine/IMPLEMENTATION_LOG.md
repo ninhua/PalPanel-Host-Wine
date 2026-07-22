@@ -72,3 +72,15 @@ P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试
 - 重验命令行中的完整 Shipping 路径和环境中的完整 `WINEPREFIX`，不接受子串匹配。
 - 新增 `PalServerShippingPath()` 正式路径入口及 Linux 单元测试；不以 PID 单值
   判断服务仍在运行。
+
+## P1-03：生命周期与日志（进行中）
+
+- `host_wine` 已从 Manager 的启动、停止、重启和状态路径接入 Go 原生实现，
+  不再落入 Docker Runner 或 Windows 进程分支。
+- 通过 `setsid` 建立独立 PalServer 会话；启动后在该 PGID 内发现并严格验证
+  Shipping 进程，再持久化完整身份。
+- 停服前重新验证 PID/PGID/启动时钟/Shipping 路径/`WINEPREFIX`；先向进程组发送
+  `SIGTERM`，超时后才发送 `SIGKILL`。
+- 继续使用 PalPanel 正式轮转日志；新增 Linux 生命周期测试夹具，覆盖启动、
+  状态恢复、身份持久化和停止。
+- 新增 `PALPANEL_WINE_BIN`，默认 `wine64`；Host Wine 前置检查不再要求 Docker。

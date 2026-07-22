@@ -12,6 +12,8 @@
   Host Wine 进程实现的稳定边界。
 - 新增 Linux Host Wine 严格进程身份校验基础：PID、进程组、`/proc` 启动时钟、
   Shipping 可执行文件参数和独立 `WINEPREFIX`。
+- 新增 Go 原生 Host Wine 启动、状态恢复和进程组停服实现；服务会话使用 `setsid`
+  隔离，并继续使用 PalPanel 的轮转日志文件。
 
 ### Changed
 
