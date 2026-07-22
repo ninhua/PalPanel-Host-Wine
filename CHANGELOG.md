@@ -18,6 +18,8 @@
   不再误用 Windows `tasklist`，也不会统计 SteamCMD 或无关 Wine 会话。
 - Windows `steamcmd.exe` 现在可由 Linux Host Wine 使用独立 Prefix 执行；Workshop
   默认 `+login anonymous`，只有用户主动选择账号模式时才校验可选登录缓存。
+- sav-cli 由官方 Launcher/便携监督器托管；缓存缺失或过期时自动重建，
+  重建失败时保留最后一份成功索引并显示降级告警。
 
 ### Changed
 

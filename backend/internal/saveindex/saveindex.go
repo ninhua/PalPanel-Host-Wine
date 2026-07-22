@@ -268,18 +268,21 @@ func (m *Manager) Current(ctx context.Context) (Index, Status, error) {
 	}
 	cached, err := m.loadCache()
 	if err != nil {
-		index := EmptyIndex()
-		status := Status{Enabled: true, State: "not_indexed", SourcePath: worldDir, Error: err.Error(), Warnings: []string{}, CachePath: m.cachePath()}
-		return index, status, err
+		return m.Rebuild(ctx)
 	}
 	status := cached.Status
 	status.Enabled = true
 	status.SourcePath = worldDir
 	status.CachePath = m.cachePath()
 	if cached.Fingerprint != fp {
-		status.State = "stale"
-		status.Stale = true
-		cached.Index.Warnings = appendUnique(cached.Index.Warnings, "save files changed after the last successful index")
+		index, rebuiltStatus, rebuildErr := m.Rebuild(ctx)
+		if rebuildErr == nil {
+			return index, rebuiltStatus, nil
+		}
+		rebuiltStatus.Stale = true
+		rebuiltStatus.Warnings = appendUnique(rebuiltStatus.Warnings, "automatic save index rebuild failed; returning the last successful index")
+		index.Warnings = appendUnique(index.Warnings, "automatic save index rebuild failed; returning the last successful index")
+		return index, rebuiltStatus, nil
 	}
 	return cached.Index, status, nil
 }
