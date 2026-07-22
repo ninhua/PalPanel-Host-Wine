@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ const DefaultPalDefenderDownloadMaxMB = 64
 const DefaultSteamAPIBaseURL = "https://api.steampowered.com"
 const DefaultSteamAPITimeoutSeconds = 15
 const DefaultSteamCMDDownloadURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
+const DefaultSteamCMDLinuxDownloadURL = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
 const DefaultSteamCMDDownloadMaxMB = 64
 const DefaultUE4SSVersion = "v3.0.1"
 const DefaultUE4SSDownloadURL = "https://github.com/UE4SS-RE/RE-UE4SS/releases/download/v3.0.1/UE4SS_v3.0.1.zip"
@@ -525,12 +527,20 @@ func (c Config) PalServerShippingPath() string {
 	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe")
 }
 
+func (c Config) PalServerLinuxPath() string {
+	return filepath.Join(c.ServerDirectory(), "PalServer.sh")
+}
+
 func (c Config) DefaultPalWorldSettingsPath() string {
 	return filepath.Join(c.ServerDirectory(), "DefaultPalWorldSettings.ini")
 }
 
 func (c Config) PalWorldSettingsPath() string {
-	return filepath.Join(c.ServerDirectory(), "Pal", "Saved", "Config", "WindowsServer", "PalWorldSettings.ini")
+	platform := "WindowsServer"
+	if runtime.GOOS == "linux" {
+		platform = "LinuxServer"
+	}
+	return filepath.Join(c.ServerDirectory(), "Pal", "Saved", "Config", platform, "PalWorldSettings.ini")
 }
 
 func (c Config) ModsDir() string {
@@ -551,6 +561,14 @@ func (c Config) LegacyModsDir() string {
 
 func (c Config) Win64Dir() string {
 	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Win64")
+}
+
+func (c Config) LinuxBinariesDir() string {
+	return filepath.Join(c.ServerDirectory(), "Pal", "Binaries", "Linux")
+}
+
+func (c Config) LinuxUE4SSPath() string {
+	return filepath.Join(c.LinuxBinariesDir(), "libUE4SS.so")
 }
 
 func (c Config) PalDefenderDir() string {
@@ -587,6 +605,9 @@ func (c Config) EffectivePalDefenderRESTBaseURL() string {
 }
 
 func (c Config) SteamCMDBinaryPath() string {
+	if runtime.GOOS == "linux" {
+		return filepath.Join(c.SteamCMDDir, "steamcmd.sh")
+	}
 	return filepath.Join(c.SteamCMDDir, "steamcmd.exe")
 }
 

@@ -37,7 +37,7 @@ func NewManager(cfg appconfig.Config, store *db.Store, runner docker.Runner, exe
 	if len(executors) > 0 && executors[0] != nil {
 		executor = executors[0]
 	}
-	nativeClient := steamcmd.New(cfg)
+	nativeClient := steamcmd.NewForPlatform(cfg, "windows")
 	return Manager{
 		cfg: cfg, store: store, runner: runner, native: nativeClient, steamAuth: nativeClient,
 		workshop: NewWorkshopService(cfg), jobs: executor, imports: newImportRegistry(cfg), local: &localActionState{},

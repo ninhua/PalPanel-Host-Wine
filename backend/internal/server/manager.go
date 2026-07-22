@@ -234,10 +234,16 @@ func (m Manager) Prerequisites(ctx context.Context) ([]Prerequisite, error) {
 			Prerequisite{ID: "wine", Label: "Wine 64-bit", OK: wineErr == nil, Required: true, Message: winePath},
 			Prerequisite{ID: "wineprefix", Label: "PalServer Wine prefix", OK: strings.TrimSpace(m.cfg.WinePrefixDir) != "", Required: true, Message: m.cfg.WinePrefixDir},
 		)
-	} else {
+	} else if mode == RuntimeWindowsSteamCMD {
 		steamCMDErr := validatePEExecutable(m.cfg.SteamCMDBinaryPath())
 		checks = append(checks,
 			Prerequisite{ID: "windows", Label: "Windows host", OK: runtime.GOOS == "windows", Required: true, Message: runtime.GOOS},
+			Prerequisite{ID: "steamcmd", Label: "SteamCMD", OK: steamCMDErr == nil, Required: false, Message: m.cfg.SteamCMDBinaryPath()},
+		)
+	} else {
+		steamCMDErr := validateHostExecutable(m.cfg.SteamCMDBinaryPath())
+		checks = append(checks,
+			Prerequisite{ID: "linux", Label: "Linux host", OK: runtime.GOOS == "linux", Required: true, Message: runtime.GOOS},
 			Prerequisite{ID: "steamcmd", Label: "SteamCMD", OK: steamCMDErr == nil, Required: false, Message: m.cfg.SteamCMDBinaryPath()},
 		)
 	}
@@ -340,15 +346,19 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 			return false
 		}
 	}
-	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
+	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine || mode == RuntimeLinuxSteamCMD {
 		m.update(jobID, "running", 25, "preparing SteamCMD", "")
 		if m.installOrUpdateFunc == nil {
-			if err := m.ensureSteamCMD(ctx); err != nil {
+			if err := m.ensureSteamCMD(ctx, mode); err != nil {
 				m.update(jobID, "failed", 25, "steamcmd setup failed", err.Error())
 				return false
 			}
 		}
-		m.update(jobID, "running", 60, action+"ing Palworld Windows dedicated server", "")
+		platform := "Windows"
+		if mode == RuntimeLinuxSteamCMD {
+			platform = "Linux"
+		}
+		m.update(jobID, "running", 60, action+"ing Palworld "+platform+" dedicated server", "")
 		if err := m.installOrUpdateRuntime(ctx, mode); err != nil {
 			m.update(jobID, "failed", 60, action+" failed", err.Error()+retainedBackupMessage(backup))
 			return false
@@ -369,6 +379,11 @@ func (m Manager) runInstallOrUpdateJob(ctx context.Context, jobID string, backup
 	}
 	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		if err := m.validateWindowsServerInstall(); err != nil {
+			m.update(jobID, "failed", 70, action+" verification failed", err.Error()+retainedBackupMessage(backup))
+			return false
+		}
+	} else if mode == RuntimeLinuxSteamCMD {
+		if err := m.validateLinuxServerInstall(); err != nil {
 			m.update(jobID, "failed", 70, action+" verification failed", err.Error()+retainedBackupMessage(backup))
 			return false
 		}
@@ -452,6 +467,10 @@ func (m Manager) ValidateStartup(ctx context.Context) []ValidationIssue {
 		if err := m.validateWindowsServerInstall(); err != nil {
 			issues = append(issues, ValidationIssue{Field: "server", Severity: "error", Message: err.Error()})
 		}
+	} else if mode == RuntimeLinuxSteamCMD {
+		if err := m.validateLinuxServerInstall(); err != nil {
+			issues = append(issues, ValidationIssue{Field: "server", Severity: "error", Message: err.Error()})
+		}
 	} else if !fileExists(m.cfg.PalServerExePath()) {
 		issues = append(issues, ValidationIssue{Field: "server", Severity: "error", Message: "PalServer.exe not found; install server first"})
 	}
@@ -492,6 +511,8 @@ func (m Manager) startUnlocked(ctx context.Context) error {
 			return fmt.Errorf("SaveGames preflight failed: %w", err)
 		}
 		err = m.startHostWine(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeLinuxSteamCMD {
+		err = m.startLinux(ctx, startup.Args(m.cfg))
 	} else {
 		err = m.runner.StartWithArgs(ctx, startup.Args(m.cfg))
 	}
@@ -536,6 +557,9 @@ func (m Manager) stopUnlocked(ctx context.Context) error {
 	if mode == RuntimeHostWine {
 		return m.stopHostWine(ctx)
 	}
+	if mode == RuntimeLinuxSteamCMD {
+		return m.stopLinux(ctx)
+	}
 	return m.runner.Stop(ctx)
 }
 
@@ -564,6 +588,11 @@ func (m Manager) restartUnlocked(ctx context.Context) error {
 			return fmt.Errorf("stop before restart: %w", err)
 		}
 		err = m.startHostWine(ctx, startup.Args(m.cfg))
+	} else if mode == RuntimeLinuxSteamCMD {
+		if err := m.stopLinux(ctx); err != nil {
+			return fmt.Errorf("stop before restart: %w", err)
+		}
+		err = m.startLinux(ctx, startup.Args(m.cfg))
 	} else {
 		err = m.runner.RestartWithArgs(ctx, startup.Args(m.cfg))
 	}
@@ -674,6 +703,8 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 		}
 	} else if mode == RuntimeHostWine {
 		container, statusErr = m.hostWineStatus(ctx)
+	} else if mode == RuntimeLinuxSteamCMD {
+		container, statusErr = m.linuxStatus(ctx)
 	} else {
 		container, statusErr = m.windowsStatus(ctx)
 	}
@@ -689,6 +720,9 @@ func (m Manager) Status(ctx context.Context) (Status, error) {
 	var installErr error
 	if mode == RuntimeWindowsSteamCMD {
 		installErr = m.validateWindowsServerInstall()
+		installed = installErr == nil
+	} else if mode == RuntimeLinuxSteamCMD {
+		installErr = m.validateLinuxServerInstall()
 		installed = installErr == nil
 	} else if !installed {
 		installed = fileExists(m.cfg.PalServerExePath())
@@ -887,6 +921,9 @@ func (m Manager) installOrUpdateRuntime(ctx context.Context, mode string) error 
 	}
 	if mode == RuntimeWindowsSteamCMD || mode == RuntimeHostWine {
 		return m.installOrUpdateWindows(ctx)
+	}
+	if mode == RuntimeLinuxSteamCMD {
+		return m.installOrUpdateLinux(ctx)
 	}
 	return m.runner.InstallOrUpdate(ctx)
 }
@@ -1108,6 +1145,9 @@ func (m Manager) clearWindowsProcessIfMatch(record windowsProcessRecord) {
 
 func (m Manager) statusWarnings(mode string, installed, configExists bool) []string {
 	var warnings []string
+	if mode == RuntimeLinuxSteamCMD {
+		warnings = append(warnings, "Native Linux mode supports UE4SS Lua mods and Linux .so plugins; PalDefender and Windows DLL mods are unavailable.")
+	}
 	if mode == RuntimeWineDocker && runtime.GOOS != "linux" {
 		warnings = append(warnings, "Docker Desktop on Windows/macOS is not recommended by official docs for production save-data IO; create backups before updates.")
 	}

@@ -75,8 +75,8 @@ const emptySudoCapability: SudoCapability = {
 };
 
 const mapRuntimeMode = (value: unknown): RuntimeMode => {
-  if (value === 'windows_steamcmd' || value === 'host_wine') return value;
-  return 'wine_docker';
+	if (value === 'windows_steamcmd' || value === 'host_wine' || value === 'linux_steamcmd') return value;
+	return 'wine_docker';
 };
 
 const mapServerImportResult = (raw: unknown): ServerImportResult => {

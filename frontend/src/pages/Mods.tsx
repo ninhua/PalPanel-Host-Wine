@@ -10,7 +10,6 @@ import {
   FolderSearch,
   Info,
   Languages,
-  LogIn,
   MonitorUp,
   PackageCheck,
   Power,

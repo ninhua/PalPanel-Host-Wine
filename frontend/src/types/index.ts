@@ -1,6 +1,6 @@
 import type { components } from '../api/generated/contracts';
 
-export type RuntimeMode = 'wine_docker' | 'windows_steamcmd' | 'host_wine';
+export type RuntimeMode = 'wine_docker' | 'windows_steamcmd' | 'host_wine' | 'linux_steamcmd';
 export type Role = 'admin' | 'operator' | 'viewer';
 export type Permission =
   | 'read'

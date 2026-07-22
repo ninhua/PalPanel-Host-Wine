@@ -40,6 +40,7 @@ import { StatusBadge } from '../components/ui/StatusBadge';
 
 const runtimeLabels: Record<RuntimeMode, string> = {
   windows_steamcmd: 'Windows SteamCMD（推荐正式服）',
+  linux_steamcmd: 'Linux SteamCMD（原生，无 Docker）',
   wine_docker: 'Docker + Wine（兼容 Windows Mod）',
   host_wine: 'Host Wine（Linux，无需 Docker）',
 };
@@ -1054,7 +1055,7 @@ const AdvancedSetupPanel: React.FC<{
               Runtime 运行方式
             </h4>
             <div className="grid grid-cols-1 gap-3">
-              {(['windows_steamcmd', 'host_wine', 'wine_docker'] as RuntimeMode[]).map((mode) => (
+              {((isLinuxHost ? ['linux_steamcmd', 'host_wine', 'wine_docker'] : ['windows_steamcmd']) as RuntimeMode[]).map((mode) => (
                 <button
                   type="button"
                   key={mode}
@@ -1071,14 +1072,16 @@ const AdvancedSetupPanel: React.FC<{
                       ? '使用本机 SteamCMD 管理 Windows 版服务端。'
                       : mode === 'host_wine'
                         ? '使用宿主便携 Wine 原生管理 Windows 版服务端，无需 Docker daemon。'
-                        : '使用 Docker + Wine 运行 Windows 版服务端和 Mod。'}
+                        : mode === 'linux_steamcmd'
+                          ? '使用本机 SteamCMD 管理原生 Linux 服务端，不需要 Docker。'
+                          : '使用 Docker + Wine 运行 Windows 版服务端和 Windows DLL Mod。'}
                   </p>
                 </button>
               ))}
             </div>
           </div>
 
-          {isLinuxHost && (
+          {isLinuxHost && runtime === 'wine_docker' && (
             <div>
               <h4 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
                 <Terminal size={16} className="text-slate-700" />

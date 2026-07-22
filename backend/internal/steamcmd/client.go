@@ -1,8 +1,10 @@
 package steamcmd
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +39,7 @@ type Client struct {
 	cfg                 appconfig.Config
 	httpClient          *http.Client
 	goos                string
+	platform            string
 	timeout             time.Duration
 	runCommand          commandRunner
 	credentialHardener  credentialHardener
@@ -54,12 +57,22 @@ type commandGate struct {
 var commandGates sync.Map
 
 func New(cfg appconfig.Config) *Client {
+	platform := runtime.GOOS
+	if platform != "linux" {
+		platform = "windows"
+	}
+	return NewForPlatform(cfg, platform)
+}
+
+func NewForPlatform(cfg appconfig.Config, platform string) *Client {
+	hostOS := runtime.GOOS
 	client := &Client{
 		cfg:                 cfg,
 		httpClient:          &http.Client{Timeout: defaultDownloadTimeout},
-		goos:                runtime.GOOS,
+		goos:                hostOS,
+		platform:            platform,
 		timeout:             defaultCommandTimeout,
-		runCommand:          steamCMDCommandRunner(cfg, runtime.GOOS),
+		runCommand:          steamCMDCommandRunner(cfg, hostOS, platform),
 		credentialHardener:  hardenCredentialTree,
 		interactiveLauncher: launchInteractiveSteamCMD,
 		now:                 time.Now,
@@ -79,9 +92,9 @@ func (c *Client) Ensure(ctx context.Context) error {
 		return nil
 	}
 	if c.goos != "windows" && c.goos != "linux" {
-		return fmt.Errorf("Windows SteamCMD requires a Windows host or Linux Host Wine")
+		return fmt.Errorf("SteamCMD requires a Windows or Linux host")
 	}
-	if c.goos == "linux" {
+	if c.platform == "windows" && c.goos == "linux" {
 		if _, err := exec.LookPath(c.cfg.WineBinary); err != nil {
 			return fmt.Errorf("SteamCMD Wine binary %q not found: %w", c.cfg.WineBinary, err)
 		}
@@ -124,15 +137,23 @@ func (c *Client) Ensure(ctx context.Context) error {
 		return err
 	}
 
-	archivePath := filepath.Join(stageRoot, "steamcmd.zip")
+	archiveName := "steamcmd.zip"
+	if c.platform == "linux" {
+		archiveName = "steamcmd_linux.tar.gz"
+	}
+	archivePath := filepath.Join(stageRoot, archiveName)
 	if err := c.downloadWithRetry(ctx, archivePath); err != nil {
 		return err
 	}
 	extracted := filepath.Join(stageRoot, "install")
-	if err := extractZip(archivePath, extracted, c.validateManaged); err != nil {
+	if c.platform == "linux" {
+		if err := extractTarGzip(archivePath, extracted, c.validateManaged); err != nil {
+			return fmt.Errorf("extract SteamCMD: %w", err)
+		}
+	} else if err := extractZip(archivePath, extracted, c.validateManaged); err != nil {
 		return fmt.Errorf("extract SteamCMD: %w", err)
 	}
-	if err := ValidatePEExecutable(filepath.Join(extracted, "steamcmd.exe")); err != nil {
+	if err := validateNativeExecutable(filepath.Join(extracted, filepath.Base(c.binaryPath())), c.platform); err != nil {
 		return fmt.Errorf("verify downloaded SteamCMD: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(c.cfg.SteamCMDDir), 0o755); err != nil {
@@ -172,7 +193,7 @@ func (c *Client) Ensure(ctx context.Context) error {
 		rollback()
 		return fmt.Errorf("activate SteamCMD: %w", err)
 	}
-	if err := ValidatePEExecutable(c.cfg.SteamCMDBinaryPath()); err != nil {
+	if err := validateNativeExecutable(c.binaryPath(), c.platform); err != nil {
 		rollback()
 		return fmt.Errorf("verify installed SteamCMD: %w", err)
 	}
@@ -291,7 +312,7 @@ func (c *Client) DownloadWorkshopTo(ctx context.Context, appID, itemID, destinat
 	args := []string{"+@sSteamCmdForcePlatformType", "windows", "+force_install_dir", stageRoot}
 	args = append(args, loginArgs...)
 	args = append(args, "+workshop_download_item", appID, itemID, "validate", "+quit")
-	out, runErr := c.runCommand(commandCtx, c.cfg.SteamCMDBinaryPath(), c.cfg.SteamCMDDir, args...)
+	out, runErr := c.runCommand(commandCtx, c.binaryPath(), c.cfg.SteamCMDDir, args...)
 	if runErr != nil {
 		if accountName != "" && loginFailureOutput(out) {
 			c.invalidateLogin()
@@ -352,7 +373,7 @@ func (c *Client) executeValidatedRedacted(ctx context.Context, validate func() e
 	}
 	commandCtx, cancel := c.commandContext(ctx)
 	defer cancel()
-	out, runErr := c.runCommand(commandCtx, c.cfg.SteamCMDBinaryPath(), c.cfg.SteamCMDDir, args...)
+	out, runErr := c.runCommand(commandCtx, c.binaryPath(), c.cfg.SteamCMDDir, args...)
 	if runErr != nil {
 		return out, c.commandError(commandCtx, runErr, out, secrets...)
 	}
@@ -532,6 +553,9 @@ func (c *Client) download(ctx context.Context, destination string) error {
 	if downloadURL == "" {
 		downloadURL = appconfig.DefaultSteamCMDDownloadURL
 	}
+	if c.platform == "linux" && (downloadURL == appconfig.DefaultSteamCMDDownloadURL || downloadURL == "") {
+		downloadURL = appconfig.DefaultSteamCMDLinuxDownloadURL
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return err
@@ -616,10 +640,93 @@ func (c *Client) validateInstalled() error {
 	if err := c.validateManaged(c.cfg.SteamCMDDir); err != nil {
 		return err
 	}
-	if err := c.validateManaged(c.cfg.SteamCMDBinaryPath()); err != nil {
+	if err := c.validateManaged(c.binaryPath()); err != nil {
 		return err
 	}
-	return ValidatePEExecutable(c.cfg.SteamCMDBinaryPath())
+	return validateNativeExecutable(c.binaryPath(), c.platform)
+}
+
+func validateNativeExecutable(path, goos string) error {
+	if goos == "windows" {
+		return ValidatePEExecutable(path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() || info.Mode()&0111 == 0 {
+		return fmt.Errorf("%s is not executable", path)
+	}
+	return nil
+}
+
+func extractTarGzip(archivePath, destination string, validate func(string) error) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return err
+	}
+	reader := tar.NewReader(gz)
+	entries := 0
+	var total int64
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		entries++
+		if entries > maxArchiveEntries {
+			return fmt.Errorf("archive contains too many entries")
+		}
+		target := filepath.Join(destination, filepath.FromSlash(header.Name))
+		if err := validate(target); err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(destination, target)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("unsafe archive path: %s", header.Name)
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			total += header.Size
+			if total > maxExtractedBytes {
+				return fmt.Errorf("archive exceeds extracted size limit")
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode)&0o755)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.CopyN(out, reader, header.Size)
+			closeErr := out.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		default:
+			return fmt.Errorf("unsupported archive entry: %s", header.Name)
+		}
+	}
+	return nil
 }
 
 func (c *Client) removeManagedDirectory(path string) error {
@@ -648,8 +755,12 @@ func ValidatePEExecutable(path string) error {
 	return nil
 }
 
-func steamCMDCommandRunner(cfg appconfig.Config, goos string) commandRunner {
-	if goos != "linux" {
+func steamCMDCommandRunner(cfg appconfig.Config, goos string, platforms ...string) commandRunner {
+	platform := "windows"
+	if len(platforms) > 0 {
+		platform = platforms[0]
+	}
+	if goos != "linux" || platform == "linux" {
 		return runCommand
 	}
 	return func(ctx context.Context, binary, directory string, args ...string) ([]byte, error) {
@@ -659,6 +770,13 @@ func steamCMDCommandRunner(cfg appconfig.Config, goos string) commandRunner {
 		cmd.Env = append(os.Environ(), "WINEPREFIX="+steamCMDWinePrefix(cfg), "WINEDEBUG=-all")
 		return runBufferedCommand(cmd)
 	}
+}
+
+func (c *Client) binaryPath() string {
+	if c.platform == "linux" {
+		return filepath.Join(c.cfg.SteamCMDDir, "steamcmd.sh")
+	}
+	return filepath.Join(c.cfg.SteamCMDDir, "steamcmd.exe")
 }
 
 func steamCMDWinePrefix(cfg appconfig.Config) string {
