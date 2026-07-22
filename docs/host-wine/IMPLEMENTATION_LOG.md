@@ -32,3 +32,11 @@
 ### 下一项
 
 P1-01：定义 `host_wine` Runtime Provider 的最小接口与模式校验测试。
+
+## P0-05：补充 Workshop 匿名模式契约
+
+- 日期：2026-07-22
+- 范围：计划、脚本映射、验收、Codex 任务说明和 CHANGELOG。
+- 要求：移除 Mod/Workshop 页面针对 Steam 账号和登录状态的强制门禁；后端正式
+  接受 `anonymous` 和空用户名；保留 PalPanel 自身认证、权限与高风险确认。
+- 程序行为：本提交仅补充实施契约，具体前后端实现归入 P1-06。

@@ -13,6 +13,8 @@
 
 - 记录 PalPanel 固定基线 `b0b3806e6c49610f43d96af361412a348f6a653d` 和
   PalOps Web 参考基线 `b51bd84a76ae0e83442feaa8c6bffc1b97e5d119`。
+- 明确 Workshop 匿名模式不依赖 Steam 用户名、登录缓存或登录状态，并要求移除
+  Mod/Workshop 页面的强制 Steam 登录门禁；PalPanel 自身认证和权限保持不变。
 
 ### Fixed
 

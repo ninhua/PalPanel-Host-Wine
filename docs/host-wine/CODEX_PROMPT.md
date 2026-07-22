@@ -67,6 +67,10 @@ Xvfb：默认 :99
 3. 原生实现启动、保存、优雅停止、强制停止、重启、日志和资源统计。
 4. Windows `steamcmd.exe` 负责服务端和 Workshop；Workshop 使用独立 `wineprefix-steamcmd`。
 5. Workshop 默认 anonymous；不默认用户名；不强制登录；可选复用缓存账号；Steam Guard/停滞/超时返回结构化状态。
+   第一阶段必须检查并删除 PalPanel 原版 Mod/Workshop 页面针对 Steam 账号和
+   Steam 登录状态的强制前端校验。匿名模式必须能够进入页面、创建下载任务并
+   完成安装。只移除 Steam 登录门槛，不得移除 PalPanel 自身的用户认证、权限
+   控制和高风险操作确认。
 6. 把 SaveGames Linux/Wine 原子替换预检和 Prepared 恢复迁入后端/正式环境探针。
 7. Launcher 正式管理 sav-cli 和 palcalc-bridge。
 8. 建立统一 GitHub 下载客户端：v4.gh-proxy.org → cdn.gh-proxy.org → 直连；SHA、大小、压缩包安全和缓存。
