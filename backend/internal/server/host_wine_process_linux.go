@@ -4,6 +4,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 )
+
+var errHostWineIdentityMismatch = errors.New("Host Wine process identity mismatch")
 
 func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineProcessRecord, error) {
 	if pid <= 0 {
@@ -44,7 +47,7 @@ func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineP
 		if currentStat, statErr := os.ReadFile(filepath.Join(procDir, "stat")); os.IsNotExist(statErr) || (statErr == nil && procStatExited(currentStat)) {
 			return hostWineProcessRecord{}, fmt.Errorf("PalServer process exited during identity verification: %w", os.ErrNotExist)
 		}
-		return hostWineProcessRecord{}, fmt.Errorf("PID %d command line does not contain expected PalServer Shipping path", pid)
+		return hostWineProcessRecord{}, fmt.Errorf("%w: PID %d command line does not contain expected PalServer Shipping path", errHostWineIdentityMismatch, pid)
 	}
 	winePrefix, err = filepath.Abs(winePrefix)
 	if err != nil {
@@ -55,7 +58,7 @@ func inspectHostWineProcess(pid int, shippingPath, winePrefix string) (hostWineP
 		return hostWineProcessRecord{}, fmt.Errorf("read PalServer environment: %w", err)
 	}
 	if !nulEnvironmentPathEquals(environ, "WINEPREFIX", winePrefix) {
-		return hostWineProcessRecord{}, fmt.Errorf("PID %d WINEPREFIX does not match the PalServer prefix", pid)
+		return hostWineProcessRecord{}, fmt.Errorf("%w: PID %d WINEPREFIX does not match the PalServer prefix", errHostWineIdentityMismatch, pid)
 	}
 	return hostWineProcessRecord{PID: pid, ProcessGroupID: pgid, StartTimeTicks: startTicks, ShippingPath: shippingPath, WinePrefix: winePrefix}, nil
 }
@@ -72,7 +75,7 @@ func procStatExited(stat []byte) bool {
 func verifyHostWineProcess(record hostWineProcessRecord) (bool, error) {
 	current, err := inspectHostWineProcess(record.PID, record.ShippingPath, record.WinePrefix)
 	if err != nil {
-		if os.IsNotExist(rootCause(err)) {
+		if os.IsNotExist(rootCause(err)) || errors.Is(err, errHostWineIdentityMismatch) {
 			return false, nil
 		}
 		return false, err
